@@ -89,3 +89,6 @@ git push origin develop
 
 - 대회 관련 문의: 해커톤 문의 오픈채팅방
 - 주최: 부산대학교 APPTIVE, 정보컴퓨터공학부 동아리연합회 / 후원: Upstage, 부산대 Anchor 사업단, 부산대 AI융합교육원
+
+
+- 김준우 브랜치 분리 테스트
