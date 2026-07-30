@@ -28,3 +28,12 @@ def initialize_database() -> None:
                 UNIQUE(course_code, section)
             )
         """)
+        connection.execute("""
+            CREATE TABLE IF NOT EXISTS saved_timetables (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                share_code TEXT NOT NULL UNIQUE,
+                timezone TEXT NOT NULL,
+                classes_json TEXT NOT NULL,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )
+        """)

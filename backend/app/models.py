@@ -138,3 +138,14 @@ class ActivityRecommendationResponse(BaseModel):
     recommendations: list[Recommendation]
     unassigned_activities: list[UnassignedActivity]
     source: Literal["SOLAR", "LOCAL"]
+
+
+class SavedTimetableRequest(BaseModel):
+    timezone: Literal["Asia/Seoul"] = "Asia/Seoul"
+    classes: list[ScheduledClass]
+
+
+class SavedTimetableResponse(BaseModel):
+    code: str
+    timezone: Literal["Asia/Seoul"]
+    classes: list[ScheduledClass]

@@ -3,10 +3,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from .catalog_import import import_catalog
 from .database import initialize_database
 from .activity_service import calculate_available_slots, make_local_recommendations, validate_recommendations
-from .models import ActivityRecommendationRequest, ActivityRecommendationResponse, CatalogImportResult, Course, TimetableRequest, TimetableResponse
+from .models import ActivityRecommendationRequest, ActivityRecommendationResponse, CatalogImportResult, Course, SavedTimetableRequest, SavedTimetableResponse, TimetableRequest, TimetableResponse
 from .repository import list_courses
 from .service import generate_timetables
 from .solar import request_solar_recommendations
+from .timetable_share import load_timetable, save_timetable
 
 app = FastAPI(title="Personal Semester Planner API", version="0.2.0")
 app.add_middleware(CORSMiddleware, allow_origins=["http://localhost:3000"], allow_methods=["*"], allow_headers=["*"])
@@ -44,6 +45,19 @@ async def import_course_catalog(file: UploadFile = File(...)) -> CatalogImportRe
 @app.post("/api/v1/timetables/generate", response_model=TimetableResponse)
 def generate(request: TimetableRequest) -> TimetableResponse:
     return TimetableResponse(timetables=generate_timetables(request))
+
+
+@app.post("/api/v1/saved-timetables", response_model=SavedTimetableResponse, status_code=201)
+def create_saved_timetable(request: SavedTimetableRequest) -> SavedTimetableResponse:
+    return save_timetable(request)
+
+
+@app.get("/api/v1/saved-timetables/{code}", response_model=SavedTimetableResponse)
+def get_saved_timetable(code: str) -> SavedTimetableResponse:
+    timetable = load_timetable(code)
+    if timetable is None:
+        raise HTTPException(status_code=404, detail="해당 코드의 시간표를 찾을 수 없습니다.")
+    return timetable
 
 
 @app.post("/api/v1/activities/recommend", response_model=ActivityRecommendationResponse)
