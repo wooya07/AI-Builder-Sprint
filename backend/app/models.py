@@ -53,9 +53,6 @@ class TimetableResponse(BaseModel):
 class CatalogImportResult(BaseModel):
     imported_count: int
     skipped_rows: list[int] = Field(default_factory=list)
-<<<<<<< HEAD
-    message: str
-=======
     message: str
 
 
@@ -146,4 +143,3 @@ class ActivityRecommendationResponse(BaseModel):
     recommendations: list[Recommendation]
     unassigned_activities: list[UnassignedActivity]
     source: Literal["SOLAR", "LOCAL"]
->>>>>>> 44145471c50adb8bfc05b8a3b5003d71be1179e7

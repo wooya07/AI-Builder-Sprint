@@ -1,9 +1,22 @@
 from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from .catalog_import import import_catalog
-from .models import CatalogImportResult, Course, TimetableRequest, TimetableResponse
+from .activity_service import (
+    calculate_available_slots,
+    make_local_recommendations,
+    validate_recommendations,
+)
+from .models import (
+    ActivityRecommendationRequest,
+    ActivityRecommendationResponse,
+    CatalogImportResult,
+    Course,
+    TimetableRequest,
+    TimetableResponse,
+)
 from .repository import list_courses
 from .service import generate_timetables
+from .solar import request_solar_recommendations
 
 app = FastAPI(title="Personal Semester Planner API", version="0.2.0")
 app.add_middleware(CORSMiddleware, allow_origins=["http://localhost:3000"], allow_methods=["*"], allow_headers=["*"])
@@ -34,9 +47,6 @@ async def import_course_catalog(file: UploadFile = File(...)) -> CatalogImportRe
 
 @app.post("/api/v1/timetables/generate", response_model=TimetableResponse)
 def generate(request: TimetableRequest) -> TimetableResponse:
-<<<<<<< HEAD
-    return TimetableResponse(timetables=generate_timetables(request))
-=======
     return TimetableResponse(timetables=generate_timetables(request))
 
 
@@ -88,4 +98,3 @@ async def recommend_activities(request: ActivityRecommendationRequest) -> Activi
         available_slots=slots, recommendations=recommendations,
         unassigned_activities=unassigned, source=source,
     )
->>>>>>> 44145471c50adb8bfc05b8a3b5003d71be1179e7
