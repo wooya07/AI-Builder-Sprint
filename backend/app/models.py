@@ -35,6 +35,13 @@ class TimetableRequest(BaseModel):
     completed_course_codes: list[str] = Field(default_factory=list)
     preferred_free_day: Day | None = None
     avoid_morning: bool = False
+    preferred_first_class_start: int | None = Field(default=None, ge=9, le=21)
+    wants_lunch: bool = False
+    wants_dinner: bool = False
+    max_consecutive_classes: int | None = Field(default=None, ge=1, le=8)
+    minimum_travel_minutes: int | None = Field(default=None, ge=0, le=180)
+    max_daily_classes: int | None = Field(default=None, ge=1, le=12)
+    preferred_end_time: int | None = Field(default=None, ge=10, le=22)
     max_results: int = Field(default=3, ge=1, le=10)
 
 
