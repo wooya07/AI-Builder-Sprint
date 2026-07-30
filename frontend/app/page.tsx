@@ -58,6 +58,9 @@ export default function Home() {
   const [avoidMorning, setAvoidMorning] = useState(true);
   const [timetables, setTimetables] = useState<Timetable[]>([]);
   const [timetableMessage, setTimetableMessage] = useState("");
+  const [shareCode, setShareCode] = useState("");
+  const [importCode, setImportCode] = useState("");
+  const [shareMessage, setShareMessage] = useState("");
 
   async function recommend() {
     setBusy(true); setMessage("");
@@ -128,6 +131,35 @@ export default function Home() {
     setCourses(imported); setView("week"); setMessage("추천 시간표를 이번 주 시간표에 반영했습니다.");
   }
 
+  async function exportTimetable() {
+    setShareMessage("");
+    try {
+      const response = await fetch(`${apiBase}/api/v1/saved-timetables`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ timezone: "Asia/Seoul", classes: courses }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.detail ?? "시간표를 저장하지 못했습니다.");
+      setShareCode(data.code);
+      setShareMessage("시간표를 저장했습니다. 아래 코드를 보관하세요.");
+    } catch (error) { setShareMessage(error instanceof Error ? error.message : "서버에 연결할 수 없습니다."); }
+  }
+
+  async function importTimetable(event: FormEvent) {
+    event.preventDefault();
+    setShareMessage("");
+    try {
+      const response = await fetch(`${apiBase}/api/v1/saved-timetables/${importCode.trim().toUpperCase()}`);
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.detail ?? "시간표를 불러오지 못했습니다.");
+      setCourses((data.classes as (Course & { class_group_id?: string })[]).map((course) => ({
+        ...course, class_group_id: course.class_group_id || course.course_id,
+      })));
+      setRecommendations([]);
+      setShareMessage("저장된 시간표를 불러왔습니다.");
+    } catch (error) { setShareMessage(error instanceof Error ? error.message : "서버에 연결할 수 없습니다."); }
+  }
+
   const plannerBoard = <div className="planner-scroll"><div className="planner-grid">
     <div className="corner"/>{days.map((item, index) => <div key={item.value} className="planner-day" style={{ gridColumn: index + 2, gridRow: 1 }}>{item.label}요일</div>)}
     {Array.from({ length: 15 }, (_, index) => index + 8).map((hour, index) => <div className="time-label" key={hour} style={{ gridColumn: 1, gridRow: `${2 + index * 2} / span 2` }}>{String(hour).padStart(2, "0")}:00</div>)}
@@ -153,7 +185,7 @@ export default function Home() {
 
     {view === "semester" && <section className="standalone-page"><div className="section-title"><div><p className="eyebrow">SEMESTER PLANNER</p><h1>학기 시간표 추천</h1></div><a href="/admin">강의 목록 가져오기 →</a></div><div className="semester-grid"><form className="panel" onSubmit={generateTimetables}><label>선호 공강 요일<select value={freeDay} onChange={(event) => setFreeDay(event.target.value)}>{["월","화","수","목","금"].map((item) => <option key={item}>{item}</option>)}</select></label><label className="check"><input type="checkbox" checked={avoidMorning} onChange={(event) => setAvoidMorning(event.target.checked)}/> 오전 수업 피하기</label><button className="primary">12학점 시간표 만들기</button></form><div className="semester-results">{timetableMessage && <p className="error">{timetableMessage}</p>}{!timetables.length && !timetableMessage && <p className="empty-result">조건을 설정하면 추천 시간표가 여기에 표시됩니다.</p>}{timetables.map((table) => <article className="panel" key={`${table.title}-${table.score}`}><p className="eyebrow">{table.title}</p><h3>{table.total_credits}학점 · 점수 {table.score}</h3>{table.courses.map((course) => <div className="catalog-course" key={`${course.code}-${course.instructor}`}><b>{course.name}</b><span>{course.meetings.map((meeting) => `${meeting.day} ${meeting.start}:00–${meeting.end}:00`).join(" · ")}</span></div>)}<button className="apply-button" onClick={() => applyTimetable(table)}>이 시간표 적용</button></article>)}</div></div></section>}
 
-    {view === "all" && <section className="standalone-page"><div className="section-title"><div><p className="eyebrow">ALL SCHEDULES</p><h1>전체 시간표 보기</h1></div></div>{plannerBoard}</section>}
+    {view === "all" && <section className="standalone-page"><div className="section-title"><div><p className="eyebrow">ALL SCHEDULES</p><h1>전체 시간표 보기</h1></div></div><div className="share-tools"><section><p className="eyebrow">EXPORT</p><h2>시간표 내보내기</h2><p>현재 시간표를 DB에 저장하고 복원 코드를 발급합니다.</p><button onClick={exportTimetable} disabled={!courses.length}>내보내기</button>{shareCode && <div className="share-code"><span>{shareCode}</span><button onClick={() => navigator.clipboard.writeText(shareCode)}>복사</button></div>}</section><form onSubmit={importTimetable}><p className="eyebrow">IMPORT</p><h2>시간표 불러오기</h2><p>이전에 발급받은 코드를 입력하세요.</p><div><input required maxLength={8} value={importCode} onChange={(event) => setImportCode(event.target.value.toUpperCase())} placeholder="8자리 코드"/><button>불러오기</button></div></form></div>{shareMessage && <p className="planner-message">{shareMessage}</p>}{plannerBoard}</section>}
 
     {modal && <div className="backdrop" onMouseDown={() => setModal(null)}><section className="modal" role="dialog" aria-modal="true" onMouseDown={(event) => event.stopPropagation()}><button className="close" onClick={() => setModal(null)}>×</button>
       {modal === "course" ? <form onSubmit={saveCourse}><p className="eyebrow">새 수업</p><h2>수업 추가하기</h2><label>요일<select value={day} onChange={(event) => setDay(event.target.value as Day)}>{days.map((item) => <option value={item.value} key={item.value}>{item.label}요일</option>)}</select></label><label>수업명<input required value={courseDraft.name} onChange={(event) => setCourseDraft({ ...courseDraft, name: event.target.value })}/></label><div className="two"><label>시작<input type="time" value={courseDraft.start} onChange={(event) => setCourseDraft({ ...courseDraft, start: event.target.value })}/></label><label>종료<input type="time" value={courseDraft.end} onChange={(event) => setCourseDraft({ ...courseDraft, end: event.target.value })}/></label></div><div className="two"><label>건물<input value={courseDraft.building} onChange={(event) => setCourseDraft({ ...courseDraft, building: event.target.value })}/></label><label>강의실<input value={courseDraft.room} onChange={(event) => setCourseDraft({ ...courseDraft, room: event.target.value })}/></label></div><button className="primary">추가하기</button></form>
