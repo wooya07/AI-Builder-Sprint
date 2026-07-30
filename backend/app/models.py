@@ -136,6 +136,52 @@ class UnassignedActivity(BaseModel):
     reason: str
 
 
+class InefficiencyModeConfig(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    enabled: bool = False
+    target_schedule_density: int = Field(default=75, ge=0, le=100, multiple_of=25, validation_alias=AliasChoices("target_schedule_density", "targetScheduleDensity"))
+    weekly_condition: int = Field(default=50, ge=0, le=100, multiple_of=25, validation_alias=AliasChoices("weekly_condition", "weeklyCondition"))
+    auto_recovery_enabled: bool = Field(default=True, validation_alias=AliasChoices("auto_recovery_enabled", "autoRecoveryEnabled"))
+
+
+class RecoveryBlock(BaseModel):
+    type: Literal["RECOVERY_BLOCK"] = "RECOVERY_BLOCK"
+    day: ActivityDay
+    start_time: str
+    end_time: str
+    duration_minutes: int = Field(ge=15, le=120, multiple_of=15)
+    reason: Literal["HIGH_SCHEDULE_DENSITY", "LOW_CONDITION", "LONG_CONTINUOUS_SCHEDULE", "LOW_TARGET_DENSITY"]
+
+
+class RecoveryScoreDetails(BaseModel):
+    rest_time_score: int
+    schedule_density_score: int
+    continuous_focus_score: int
+    recovery_activity_score: int
+
+
+class RecoveryAnalysis(BaseModel):
+    score: int
+    grade: int
+    status_message: str
+    score_details: RecoveryScoreDetails
+    total_rest_minutes: int
+    schedule_density_percent: int
+    longest_continuous_focus_minutes: int
+    recovery_activity_minutes: int
+    calculated_from: list[str]
+    reasons: list[str]
+    suggestions: list[str]
+
+
+class RecoveryAnalysisRequest(BaseModel):
+    classes: list[ScheduledClass]
+    activities: list[Activity] = Field(default_factory=list)
+    recommendations: list[Recommendation] = Field(default_factory=list)
+    recovery_blocks: list[RecoveryBlock] = Field(default_factory=list)
+
+
 class ActivityRecommendationRequest(BaseModel):
     date: str
     day: ActivityDay
@@ -143,6 +189,7 @@ class ActivityRecommendationRequest(BaseModel):
     day_end_time: str = Field(default="22:00", pattern=r"^(?:[01]\d|2[0-3]):[0-5]\d$")
     classes: list[ScheduledClass]
     activities: list[Activity]
+    inefficiency_mode: InefficiencyModeConfig = Field(default_factory=InefficiencyModeConfig, validation_alias=AliasChoices("inefficiency_mode", "inefficiencyMode"))
 
 
 class ActivityRecommendationResponse(BaseModel):
@@ -150,3 +197,4 @@ class ActivityRecommendationResponse(BaseModel):
     recommendations: list[Recommendation]
     unassigned_activities: list[UnassignedActivity]
     source: Literal["SOLAR", "LOCAL"]
+    recovery_blocks: list[RecoveryBlock] = Field(default_factory=list)
