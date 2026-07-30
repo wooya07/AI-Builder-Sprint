@@ -3,6 +3,7 @@
 import { FormEvent, useMemo, useState } from "react";
 
 type Day = "MON" | "TUE" | "WED" | "THU" | "FRI";
+type View = "semester" | "week" | "all";
 type Course = { course_id: string; course_name: string; day: Day; start_time: string; end_time: string; location: { building: string; room: string } };
 type Activity = {
   activity_id: string; category: string; activity_name: string; priority: "REQUIRED" | "OPTIONAL";
@@ -16,29 +17,32 @@ type CatalogCourse = { code: string; name: string; credits: number; instructor: 
 type Timetable = { title: string; score: number; reasons: string[]; courses: CatalogCourse[]; total_credits: number };
 
 const apiBase = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000";
-const days: { value: Day; label: string; date: number }[] = [
-  { value: "MON", label: "월", date: 7 }, { value: "TUE", label: "화", date: 8 },
-  { value: "WED", label: "수", date: 9 }, { value: "THU", label: "목", date: 10 },
-  { value: "FRI", label: "금", date: 11 },
+const days: { value: Day; label: string }[] = [
+  { value: "MON", label: "월" }, { value: "TUE", label: "화" }, { value: "WED", label: "수" },
+  { value: "THU", label: "목" }, { value: "FRI", label: "금" },
 ];
+const koreanDay: Record<string, Day> = { 월: "MON", 화: "TUE", 수: "WED", 목: "THU", 금: "FRI" };
 const categories = [
   ["STUDY", "개인 공부", "✎"], ["EXERCISE", "운동", "●"], ["HOBBY", "취미 생활", "✦"],
   ["PART_TIME_JOB", "알바", "₩"], ["REST", "휴식", "☁"], ["SOCIAL", "친구", "☺"], ["OTHER", "기타", "+"],
 ];
 const categoryMap = Object.fromEntries(categories.map(([value, label]) => [value, label]));
 const iconMap = Object.fromEntries(categories.map(([value, , icon]) => [value, icon]));
-const initialCourses: Course[] = [];
-const initialActivities: Activity[] = [];
 
-function durationLabel(minutes: number) {
+const timeToRow = (time: string) => {
+  const [hour, minute] = time.split(":").map(Number);
+  return 2 + (hour - 8) * 2 + Math.floor(minute / 30);
+};
+const durationLabel = (minutes: number) => {
   const hours = Math.floor(minutes / 60), rest = minutes % 60;
   return `${hours ? `${hours}시간` : ""}${hours && rest ? " " : ""}${rest ? `${rest}분` : ""}` || "0분";
-}
+};
 
 export default function Home() {
+  const [view, setView] = useState<View>("week");
   const [day, setDay] = useState<Day>("MON");
-  const [courses, setCourses] = useState(initialCourses);
-  const [activities, setActivities] = useState(initialActivities);
+  const [courses, setCourses] = useState<Course[]>([]);
+  const [activities, setActivities] = useState<Activity[]>([]);
   const [dayEnd, setDayEnd] = useState("22:00");
   const [slots, setSlots] = useState<Slot[]>([]);
   const [recommendations, setRecommendations] = useState<Recommendation[]>([]);
@@ -47,13 +51,13 @@ export default function Home() {
   const [modal, setModal] = useState<"course" | "activity" | null>(null);
   const [step, setStep] = useState(1);
   const [courseDraft, setCourseDraft] = useState({ name: "", start: "09:00", end: "10:30", building: "", room: "" });
-  const [activityDraft, setActivityDraft] = useState({ category: "", name: "", priority: "REQUIRED" as "REQUIRED" | "OPTIONAL", duration: 60, useWeeklyPlan: true, frequency: 2, fixed: true, preferredDays: ["MON"] as Day[], preferred: true, preferredStart: "17:00", preferredEnd: "21:00" });
+  const [activityDraft, setActivityDraft] = useState({ category: "", name: "", priority: "REQUIRED" as "REQUIRED" | "OPTIONAL", duration: 60, useWeeklyPlan: false, frequency: 2, fixed: false, preferredDays: ["MON"] as Day[], preferred: false, preferredStart: "17:00", preferredEnd: "21:00" });
   const [freeDay, setFreeDay] = useState("금");
   const [avoidMorning, setAvoidMorning] = useState(true);
   const [timetables, setTimetables] = useState<Timetable[]>([]);
   const [timetableMessage, setTimetableMessage] = useState("");
 
-  const dayCourses = useMemo(() => courses.filter((item) => item.day === day).sort((a, b) => a.start_time.localeCompare(b.start_time)), [courses, day]);
+  const selectedDayCourses = useMemo(() => courses.filter((item) => item.day === day), [courses, day]);
 
   async function recommend() {
     setBusy(true); setMessage("");
@@ -65,7 +69,8 @@ export default function Home() {
       const data = await response.json();
       if (!response.ok) throw new Error(data.detail ?? "추천을 만들지 못했습니다.");
       setSlots(data.available_slots); setRecommendations(data.recommendations);
-      setMessage(`${data.source === "SOLAR" ? "Solar" : "스마트 배치"}가 ${data.recommendations.length}개의 일정을 찾았습니다.`);
+      setMessage(data.recommendations.length ? `${data.recommendations.length}개의 추천을 시간표에 표시했습니다.` : "조건에 맞는 활동을 찾지 못했습니다.");
+      setView("week");
     } catch (error) { setMessage(error instanceof Error ? error.message : "서버에 연결할 수 없습니다."); }
     finally { setBusy(false); }
   }
@@ -84,12 +89,11 @@ export default function Home() {
       completed_count_this_week: 0, preferred_days: activityDraft.useWeeklyPlan && activityDraft.fixed ? activityDraft.preferredDays : [],
       preferred_time_range: activityDraft.preferred ? { start_time: activityDraft.preferredStart, end_time: activityDraft.preferredEnd } : null,
     }]);
-    setModal(null); setStep(1); setActivityDraft({ category: "", name: "", priority: "REQUIRED", duration: 60, useWeeklyPlan: true, frequency: 2, fixed: true, preferredDays: ["MON"], preferred: true, preferredStart: "17:00", preferredEnd: "21:00" });
+    setModal(null); setStep(1);
   }
 
   async function generateTimetables(event: FormEvent) {
-    event.preventDefault();
-    setTimetableMessage("");
+    event.preventDefault(); setTimetableMessage("");
     try {
       const response = await fetch(`${apiBase}/api/v1/timetables/generate`, {
         method: "POST", headers: { "Content-Type": "application/json" },
@@ -100,46 +104,46 @@ export default function Home() {
     } catch (error) { setTimetableMessage(error instanceof Error ? error.message : "서버에 연결할 수 없습니다."); }
   }
 
+  function applyTimetable(table: Timetable) {
+    const imported: Course[] = table.courses.flatMap((course) => course.meetings.map((meeting, index) => ({
+      course_id: `${course.code}-${index}`, course_name: course.name, day: koreanDay[meeting.day],
+      start_time: `${String(meeting.start).padStart(2, "0")}:00`, end_time: `${String(meeting.end).padStart(2, "0")}:00`,
+      location: { building: "", room: "" },
+    }))).filter((course) => Boolean(course.day));
+    setCourses(imported); setView("week"); setMessage("추천 시간표를 이번 주 시간표에 반영했습니다.");
+  }
+
   return <main>
-    <header><a className="logo" href="#"><b>틈</b><span>공강을 나답게</span></a><nav><a className="active">오늘</a><a href="#schedule">시간표</a><a href="#activities">활동</a></nav><div className="profile" aria-label="사용자">●</div></header>
-    <section className="hero"><div><p className="eyebrow">TODAY</p><h1>오늘의 빈틈,<br/><em>어떻게 채워볼까요?</em></h1><p>수업 사이와 하교 후 시간을 살펴보고<br/>꼭 맞는 활동만 골라 추천해 드릴게요.</p></div><div className="orbit"><span>☀</span><small>등록한 활동<br/><b>{activities.length}개</b></small></div></section>
-    <section className="weekly-wrap" aria-label="주간 시간표">
-      <div className="weekly-heading"><div><p className="eyebrow">WEEK AT A GLANCE</p><h2>이번 주 시간표</h2></div><p>추천받을 요일의 머리글을 눌러 선택하세요.</p></div>
-      <div className="weekly-scroll"><div className="weekly-board">{days.map((item) => {
-        const columnCourses = courses.filter((course) => course.day === item.value).sort((a, b) => a.start_time.localeCompare(b.start_time));
-        return <section className={`day-column ${day === item.value ? "current" : ""}`} key={item.value}>
-          <button className="day-header" onClick={() => { setDay(item.value); setSlots([]); setRecommendations([]); }}><span>{item.label}요일</span><b>{item.date}</b>{day === item.value && <i>추천 기준</i>}</button>
-          <div className="day-classes">{columnCourses.length ? columnCourses.map((course) => <article key={course.course_id}><time>{course.start_time}<small>{course.end_time}</small></time><div><b>{course.course_name}</b><span>{course.location.building} {course.location.room}</span></div></article>) : <p>수업 없음</p>}</div>
-        </section>;
-      })}</div></div>
-    </section>
+    <header><a className="logo" href="#"><b>틈</b><span>공강을 나답게</span></a><nav className="page-nav"><button className={view === "semester" ? "active" : ""} onClick={() => setView("semester")}>학기 시간표 추천</button><button className={view === "week" ? "active" : ""} onClick={() => setView("week")}>이번 주 시간표</button><button className={view === "all" ? "active" : ""} onClick={() => setView("all")}>전체 시간표 보기</button></nav><div className="profile" aria-label="사용자">●</div></header>
 
-    <section className="dashboard">
-      <section id="schedule" className="panel schedule">
-        <div className="section-title"><div><p className="eyebrow">TODAY&apos;S FLOW</p><h2>오늘의 흐름</h2></div><button className="link-button" onClick={() => setModal("course")}>+ 수업 추가</button></div>
-        <div className="timeline">{dayCourses.length ? dayCourses.map((course) => {
-          const gap = slots.find((item) => item.start_time === course.end_time);
-          return <div key={course.course_id}><article className="course"><time>{course.start_time}</time><div><b>{course.course_name}</b><small>{course.location.building} {course.location.room}</small></div><button aria-label="수업 삭제" onClick={() => setCourses((current) => current.filter((item) => item.course_id !== course.course_id))}>×</button></article>{gap && <div className={`gap ${gap.slot_type === "AFTER_CLASSES" ? "after" : ""}`}><span>{gap.slot_type === "AFTER_CLASSES" ? "하교 후" : "공강"}</span><b>{gap.start_time} — {gap.end_time}</b><small>{durationLabel(gap.duration_minutes)}의 여유</small></div>}</div>;
-        }) : <div className="empty"><b>수업이 없는 날이에요</b><span>수업을 추가하면 빈 시간을 계산해 드려요.</span></div>}</div>
-        <label className="day-end">하루 마감 시간 <input type="time" value={dayEnd} onChange={(event) => setDayEnd(event.target.value)}/></label>
+    {view === "week" && <><section className="compact-hero"><div><p className="eyebrow">WEEKLY PLANNER</p><h1>이번 주의 빈틈을<br/><em>한눈에 채워보세요.</em></h1></div><div className="week-actions"><label>추천 요일<select value={day} onChange={(event) => setDay(event.target.value as Day)}>{days.map((item) => <option value={item.value} key={item.value}>{item.label}요일</option>)}</select></label><label>하루 마감<input type="time" value={dayEnd} onChange={(event) => setDayEnd(event.target.value)}/></label><button onClick={recommend} disabled={busy || !selectedDayCourses.length || !activities.length}>{busy ? "추천 중..." : "활동 추천받기"}</button></div></section>
+      <section className="planner-shell">
+        <div className="planner-toolbar"><div><p className="eyebrow">WEEK AT A GLANCE</p><h2>주간 시간표</h2></div><button onClick={() => setModal("course")}>+ 수업 추가</button></div>
+        {message && <p className="planner-message">{message}</p>}
+        <div className="planner-scroll"><div className="planner-grid">
+          <div className="corner"/>{days.map((item, index) => <button key={item.value} className={`planner-day ${day === item.value ? "selected-day" : ""}`} style={{ gridColumn: index + 2, gridRow: 1 }} onClick={() => setDay(item.value)}>{item.label}요일</button>)}
+          {Array.from({ length: 15 }, (_, index) => index + 8).map((hour, index) => <div className="time-label" key={hour} style={{ gridColumn: 1, gridRow: `${2 + index * 2} / span 2` }}>{String(hour).padStart(2, "0")}:00</div>)}
+          {days.map((item, dayIndex) => <div key={item.value} className="planner-lane" style={{ gridColumn: dayIndex + 2, gridRow: "2 / span 28" }}/>)}
+          {courses.map((course) => {
+            const dayIndex = days.findIndex((item) => item.value === course.day);
+            return <article className="planner-block course-block" key={course.course_id} style={{ gridColumn: dayIndex + 2, gridRow: `${timeToRow(course.start_time)} / ${timeToRow(course.end_time)}` }}><b>{course.course_name}</b><span>{course.start_time}–{course.end_time}</span><button aria-label={`${course.course_name} 삭제`} onClick={() => setCourses((current) => current.filter((item) => item.course_id !== course.course_id))}>×</button></article>;
+          })}
+          {recommendations.map((item) => {
+            const dayIndex = days.findIndex((entry) => entry.value === day);
+            return <article className="planner-block recommendation-block" key={`${item.activity_id}-${item.start_time}`} style={{ gridColumn: dayIndex + 2, gridRow: `${timeToRow(item.start_time)} / ${timeToRow(item.end_time)}` }}><b>{iconMap[item.category]} {item.activity_name}</b><span>{item.start_time}–{item.end_time}</span><small>추천 활동</small></article>;
+          })}
+        </div></div>
       </section>
+      <section className="activity-dock"><div className="section-title"><div><p className="eyebrow">MY ACTIVITIES</p><h2>등록한 활동</h2></div><button className="add" onClick={() => setModal("activity")}>+</button></div>{activities.length ? <div className="activity-row">{activities.map((activity) => <article key={activity.activity_id}><span className="activity-icon">{iconMap[activity.category]}</span><div><b>{activity.activity_name}</b><small>{categoryMap[activity.category]} · {activity.frequency_per_week ? `주 ${activity.frequency_per_week}회` : "요일·횟수 자유"} · {durationLabel(activity.duration_minutes)}</small></div><button className="delete-activity" onClick={() => { setActivities((current) => current.filter((item) => item.activity_id !== activity.activity_id)); setRecommendations((current) => current.filter((item) => item.activity_id !== activity.activity_id)); }} aria-label={`${activity.activity_name} 삭제`}>삭제</button></article>)}</div> : <p className="empty-result">등록된 활동이 없습니다. + 버튼으로 활동을 추가하세요.</p>}</section>
+    </>}
 
-      <aside>
-        <section className="recommend-card"><i>✦</i><p>오늘의 빈틈에 맞춰</p><h2>나만의 활동을<br/>추천받아 보세요</h2><button onClick={recommend} disabled={busy || !dayCourses.length}>{busy ? "찾는 중..." : "활동 추천받기"} <span>→</span></button></section>
-        <section id="activities" className="panel activities"><div className="section-title"><div><p className="eyebrow">MY ACTIVITIES</p><h3>등록한 활동</h3></div><button className="add" onClick={() => setModal("activity")}>+</button></div>{activities.map((activity) => <article key={activity.activity_id}><span className="activity-icon">{iconMap[activity.category]}</span><div><b>{activity.activity_name}</b><small>{categoryMap[activity.category]} · {activity.frequency_per_week ? `주 ${activity.frequency_per_week}회` : "요일·횟수 자유"} · {durationLabel(activity.duration_minutes)}</small></div><i>{activity.priority === "REQUIRED" ? "꼭" : "선택"}</i></article>)}</section>
-      </aside>
-    </section>
+    {view === "semester" && <section className="standalone-page"><div className="section-title"><div><p className="eyebrow">SEMESTER PLANNER</p><h1>학기 시간표 추천</h1></div><a href="/admin">강의 목록 가져오기 →</a></div><div className="semester-grid"><form className="panel" onSubmit={generateTimetables}><label>선호 공강 요일<select value={freeDay} onChange={(event) => setFreeDay(event.target.value)}>{["월","화","수","목","금"].map((item) => <option key={item}>{item}</option>)}</select></label><label className="check"><input type="checkbox" checked={avoidMorning} onChange={(event) => setAvoidMorning(event.target.checked)}/> 오전 수업 피하기</label><button className="primary">12학점 시간표 만들기</button></form><div className="semester-results">{timetableMessage && <p className="error">{timetableMessage}</p>}{!timetables.length && !timetableMessage && <p className="empty-result">조건을 설정하면 추천 시간표가 여기에 표시됩니다.</p>}{timetables.map((table) => <article className="panel" key={`${table.title}-${table.score}`}><p className="eyebrow">{table.title}</p><h3>{table.total_credits}학점 · 점수 {table.score}</h3>{table.courses.map((course) => <div className="catalog-course" key={`${course.code}-${course.instructor}`}><b>{course.name}</b><span>{course.meetings.map((meeting) => `${meeting.day} ${meeting.start}:00–${meeting.end}:00`).join(" · ")}</span></div>)}<button className="apply-button" onClick={() => applyTimetable(table)}>이 시간표 적용</button></article>)}</div></div></section>}
 
-    {(message || recommendations.length > 0) && <section className="recommendations"><div className="section-title"><div><p className="eyebrow">SMART PICKS</p><h2>추천 일정</h2></div><span>{message}</span></div><div className="recommend-grid">{recommendations.map((item) => <article key={`${item.activity_id}-${item.start_time}`}><div><span className="activity-icon">{iconMap[item.category]}</span><i>{item.slot_type === "AFTER_CLASSES" ? "하교 후 추천" : "공강 추천"}</i></div><h3>{item.activity_name}</h3><strong>{item.start_time} — {item.end_time}</strong><p>{item.reason}</p><button onClick={() => setMessage(`${item.activity_name} 일정을 선택했습니다.`)}>이 일정 선택</button></article>)}</div></section>}
-
-    <section className="semester-builder">
-      <div className="section-title"><div><p className="eyebrow">SEMESTER PLANNER</p><h2>학기 시간표 추천</h2></div><a href="/admin">강의 목록 가져오기 →</a></div>
-      <div className="semester-grid"><form className="panel" onSubmit={generateTimetables}><label>선호 공강 요일<select value={freeDay} onChange={(event) => setFreeDay(event.target.value)}>{["월","화","수","목","금"].map((item) => <option key={item}>{item}</option>)}</select></label><label className="check"><input type="checkbox" checked={avoidMorning} onChange={(event) => setAvoidMorning(event.target.checked)}/> 오전 수업 피하기</label><button className="primary">12학점 시간표 만들기</button></form><div className="semester-results">{timetableMessage && <p className="error">{timetableMessage}</p>}{!timetables.length && !timetableMessage && <p className="empty-result">기존 시간표 생성 기능도 이곳에서 계속 사용할 수 있습니다.</p>}{timetables.map((table) => <article className="panel" key={`${table.title}-${table.score}`}><p className="eyebrow">{table.title}</p><h3>{table.total_credits}학점 · 점수 {table.score}</h3>{table.courses.map((course) => <div className="catalog-course" key={`${course.code}-${course.instructor}`}><b>{course.name}</b><span>{course.meetings.map((meeting) => `${meeting.day} ${meeting.start}:00–${meeting.end}:00`).join(" · ")}</span></div>)}</article>)}</div></div>
-    </section>
+    {view === "all" && <section className="standalone-page"><div className="section-title"><div><p className="eyebrow">ALL SCHEDULES</p><h1>전체 시간표 보기</h1></div><button className="link-button" onClick={() => setModal("course")}>+ 수업 추가</button></div>{courses.length ? <div className="all-course-list">{days.map((item) => <section className="panel" key={item.value}><h2>{item.label}요일</h2>{courses.filter((course) => course.day === item.value).map((course) => <article key={course.course_id}><time>{course.start_time}–{course.end_time}</time><div><b>{course.course_name}</b><span>{course.location.building} {course.location.room}</span></div><button onClick={() => setCourses((current) => current.filter((entry) => entry.course_id !== course.course_id))}>삭제</button></article>)}</section>)}</div> : <p className="empty-result">등록된 수업이 없습니다.</p>}</section>}
 
     {modal && <div className="backdrop" onMouseDown={() => setModal(null)}><section className="modal" role="dialog" aria-modal="true" onMouseDown={(event) => event.stopPropagation()}><button className="close" onClick={() => setModal(null)}>×</button>
-      {modal === "course" ? <form onSubmit={saveCourse}><p className="eyebrow">{days.find((item) => item.value === day)?.label}요일</p><h2>수업 추가하기</h2><label>수업명<input required value={courseDraft.name} onChange={(event) => setCourseDraft({ ...courseDraft, name: event.target.value })}/></label><div className="two"><label>시작<input type="time" value={courseDraft.start} onChange={(event) => setCourseDraft({ ...courseDraft, start: event.target.value })}/></label><label>종료<input type="time" value={courseDraft.end} onChange={(event) => setCourseDraft({ ...courseDraft, end: event.target.value })}/></label></div><div className="two"><label>건물<input value={courseDraft.building} onChange={(event) => setCourseDraft({ ...courseDraft, building: event.target.value })}/></label><label>강의실<input value={courseDraft.room} onChange={(event) => setCourseDraft({ ...courseDraft, room: event.target.value })}/></label></div><button className="primary">추가하기</button></form>
-      : <><p className="eyebrow">STEP {step} OF 3</p><h2>{step === 1 ? "어떤 활동을 하고 싶나요?" : step === 2 ? "얼마나 자주 할까요?" : "언제가 가장 좋나요?"}</h2><div className="progress"><span style={{ width: `${step * 33.33}%` }}/></div>
+      {modal === "course" ? <form onSubmit={saveCourse}><p className="eyebrow">새 수업</p><h2>수업 추가하기</h2><label>요일<select value={day} onChange={(event) => setDay(event.target.value as Day)}>{days.map((item) => <option value={item.value} key={item.value}>{item.label}요일</option>)}</select></label><label>수업명<input required value={courseDraft.name} onChange={(event) => setCourseDraft({ ...courseDraft, name: event.target.value })}/></label><div className="two"><label>시작<input type="time" value={courseDraft.start} onChange={(event) => setCourseDraft({ ...courseDraft, start: event.target.value })}/></label><label>종료<input type="time" value={courseDraft.end} onChange={(event) => setCourseDraft({ ...courseDraft, end: event.target.value })}/></label></div><div className="two"><label>건물<input value={courseDraft.building} onChange={(event) => setCourseDraft({ ...courseDraft, building: event.target.value })}/></label><label>강의실<input value={courseDraft.room} onChange={(event) => setCourseDraft({ ...courseDraft, room: event.target.value })}/></label></div><button className="primary">추가하기</button></form>
+      : <><p className="eyebrow">STEP {step} OF 3</p><h2>{step === 1 ? "어떤 활동을 하고 싶나요?" : step === 2 ? "얼마나 필요할까요?" : "선호 조건이 있나요?"}</h2><div className="progress"><span style={{ width: `${step * 33.33}%` }}/></div>
         {step === 1 && <><div className="category-grid">{categories.map(([value, label, icon]) => <button key={value} className={activityDraft.category === value ? "selected" : ""} onClick={() => setActivityDraft({ ...activityDraft, category: value })}><span>{icon}</span>{label}</button>)}</div>{activityDraft.category && <label>활동명<input autoFocus value={activityDraft.name} onChange={(event) => setActivityDraft({ ...activityDraft, name: event.target.value })} placeholder="활동명을 입력하세요"/></label>}</>}
         {step === 2 && <><div className="choices"><button className={activityDraft.priority === "REQUIRED" ? "selected" : ""} onClick={() => setActivityDraft({ ...activityDraft, priority: "REQUIRED" })}><b>꼭 해야 해요</b><small>먼저 자리를 찾아요</small></button><button className={activityDraft.priority === "OPTIONAL" ? "selected" : ""} onClick={() => setActivityDraft({ ...activityDraft, priority: "OPTIONAL" })}><b>가능하면 하고 싶어요</b><small>여유가 있을 때 추천해요</small></button></div><label>한 번에 필요한 시간 <b>{durationLabel(activityDraft.duration)}</b><input type="range" min="0" max="180" step="15" value={activityDraft.duration} onChange={(event) => setActivityDraft({ ...activityDraft, duration: Number(event.target.value) })}/></label></>}
         {step === 3 && <><label className="switch"><span>요일과 주간 횟수를 설정할게요</span><input type="checkbox" checked={activityDraft.useWeeklyPlan} onChange={(event) => setActivityDraft({ ...activityDraft, useWeeklyPlan: event.target.checked })}/></label>{activityDraft.useWeeklyPlan && <><label>주간 횟수<input type="number" min="1" max="7" value={activityDraft.frequency} onChange={(event) => setActivityDraft({ ...activityDraft, frequency: Number(event.target.value) })}/></label><label className="switch"><span>특정 요일을 정할게요</span><input type="checkbox" checked={activityDraft.fixed} onChange={(event) => setActivityDraft({ ...activityDraft, fixed: event.target.checked })}/></label>{activityDraft.fixed && <div className="day-pills">{days.map((item) => <button key={item.value} className={activityDraft.preferredDays.includes(item.value) ? "selected" : ""} onClick={() => setActivityDraft({ ...activityDraft, preferredDays: activityDraft.preferredDays.includes(item.value) ? activityDraft.preferredDays.filter((value) => value !== item.value) : [...activityDraft.preferredDays, item.value] })}>{item.label}</button>)}</div>}</>}<label className="switch"><span>선호 시간대가 있어요</span><input type="checkbox" checked={activityDraft.preferred} onChange={(event) => setActivityDraft({ ...activityDraft, preferred: event.target.checked })}/></label>{activityDraft.preferred && <div className="two"><label>시작<input type="time" value={activityDraft.preferredStart} onChange={(event) => setActivityDraft({ ...activityDraft, preferredStart: event.target.value })}/></label><label>종료<input type="time" value={activityDraft.preferredEnd} onChange={(event) => setActivityDraft({ ...activityDraft, preferredEnd: event.target.value })}/></label></div>}</>}
