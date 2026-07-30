@@ -2,12 +2,7 @@ import re
 from .database import get_connection
 from .models import Course, Meeting
 
-COURSES: list[Course] = [
-    Course(code="CS201", name="Data Structures", credits=3, category="Major Required", instructor="Kim", meetings=[{"day": "\uc6d4", "start": 13, "end": 15}, {"day": "\uc218", "start": 13, "end": 15}]),
-    Course(code="CS203", name="Web Programming", credits=3, category="Major Elective", instructor="Park", meetings=[{"day": "\ud654", "start": 13, "end": 15}, {"day": "\ubaa9", "start": 13, "end": 15}]),
-    Course(code="GE101", name="Writing", credits=3, category="General Education", instructor="Choi", meetings=[{"day": "\uc6d4", "start": 10, "end": 12}, {"day": "\uc218", "start": 10, "end": 12}]),
-    Course(code="GE102", name="English Conversation", credits=3, category="General Education", instructor="Jung", meetings=[{"day": "\ud654", "start": 15, "end": 17}, {"day": "\ubaa9", "start": 15, "end": 17}]),
-]
+COURSES: list[Course] = []
 
 
 def parse_meetings(schedule_text: str) -> list[Meeting]:

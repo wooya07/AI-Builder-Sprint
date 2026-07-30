@@ -49,3 +49,83 @@ class CatalogImportResult(BaseModel):
     imported_count: int
     skipped_rows: list[int] = Field(default_factory=list)
     message: str
+
+
+ActivityDay = Literal["MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN"]
+SlotType = Literal["BETWEEN_CLASSES", "AFTER_CLASSES", "BEFORE_CLASSES", "NO_CLASS_DAY"]
+Category = Literal["STUDY", "EXERCISE", "HOBBY", "PART_TIME_JOB", "REST", "SOCIAL", "OTHER"]
+RecommendationStatus = Literal["AVAILABLE", "CONFLICT", "INSUFFICIENT_TIME", "OUTSIDE_PREFERRED_TIME", "ALREADY_COMPLETED"]
+
+
+class Location(BaseModel):
+    building: str = ""
+    room: str = ""
+
+
+class ScheduledClass(BaseModel):
+    course_id: str
+    course_name: str
+    day: ActivityDay
+    start_time: str = Field(pattern=r"^(?:[01]\d|2[0-3]):[0-5]\d$")
+    end_time: str = Field(pattern=r"^(?:[01]\d|2[0-3]):[0-5]\d$")
+    location: Location = Field(default_factory=Location)
+
+
+class PreferredTimeRange(BaseModel):
+    start_time: str = Field(pattern=r"^(?:[01]\d|2[0-3]):[0-5]\d$")
+    end_time: str = Field(pattern=r"^(?:[01]\d|2[0-3]):[0-5]\d$")
+
+
+class Activity(BaseModel):
+    activity_id: str
+    category: Category
+    activity_name: str = Field(min_length=1, max_length=80)
+    priority: Literal["REQUIRED", "OPTIONAL"]
+    schedule_type: Literal["FIXED_DAY", "FLEXIBLE_DAY"]
+    duration_minutes: int = Field(ge=15, le=180, multiple_of=15)
+    frequency_per_week: int | None = Field(default=None, ge=1, le=7)
+    completed_count_this_week: int = Field(default=0, ge=0, le=7)
+    preferred_days: list[ActivityDay] = Field(default_factory=list)
+    preferred_time_range: PreferredTimeRange | None = None
+
+
+class AvailableSlot(BaseModel):
+    day: ActivityDay
+    slot_type: SlotType
+    start_time: str
+    end_time: str
+    duration_minutes: int
+
+
+class Recommendation(BaseModel):
+    activity_id: str
+    activity_name: str
+    category: Category
+    slot_type: SlotType
+    start_time: str
+    end_time: str
+    duration_minutes: int
+    reason: str
+    status: RecommendationStatus
+
+
+class UnassignedActivity(BaseModel):
+    activity_id: str
+    status: RecommendationStatus
+    reason: str
+
+
+class ActivityRecommendationRequest(BaseModel):
+    date: str
+    day: ActivityDay
+    timezone: Literal["Asia/Seoul"] = "Asia/Seoul"
+    day_end_time: str = Field(default="22:00", pattern=r"^(?:[01]\d|2[0-3]):[0-5]\d$")
+    classes: list[ScheduledClass]
+    activities: list[Activity]
+
+
+class ActivityRecommendationResponse(BaseModel):
+    available_slots: list[AvailableSlot]
+    recommendations: list[Recommendation]
+    unassigned_activities: list[UnassignedActivity]
+    source: Literal["SOLAR", "LOCAL"]
