@@ -6,12 +6,17 @@ Day = Literal["\uc6d4", "\ud654", "\uc218", "\ubaa9", "\uae08"]
 
 class Meeting(BaseModel):
     day: Day
-    start: int = Field(ge=9, le=21)
-    end: int = Field(ge=10, le=22)
+    start: int = Field(ge=0, le=23)
+    end: int = Field(ge=1, le=24)
+    start_minutes: int | None = Field(default=None, ge=0, le=1439)
+    duration_minutes: int | None = Field(default=None, ge=1)
+    building: str | None = None
+    room: str | None = None
 
 
 class Course(BaseModel):
     code: str
+    class_group_id: str | None = None
     name: str
     credits: int = Field(ge=1, le=6)
     category: str
