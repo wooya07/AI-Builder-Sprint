@@ -6,7 +6,8 @@ from .activity_service import calculate_available_slots, make_local_recommendati
 from .models import ActivityRecommendationRequest, ActivityRecommendationResponse, CatalogImportResult, Course, SavedTimetableRequest, SavedTimetableResponse, TimetableRequest, TimetableResponse
 from .repository import list_courses
 from .service import generate_timetables
-from .solar import request_solar_recommendations
+from .solar import request_recovery_explanation, request_solar_recommendations
+from .recovery import apply_inefficiency_mode
 from .timetable_share import load_timetable, save_timetable
 
 app = FastAPI(title="Personal Semester Planner API", version="0.2.0")
@@ -104,7 +105,26 @@ async def recommend_activities(request: ActivityRecommendationRequest) -> Activi
             slots, request.day,
         )
         source = "SOLAR"
+    recovery_blocks = []
+    recovery_analysis = None
+    warnings = []
+    if request.inefficiency_mode and request.inefficiency_mode.enabled:
+        recommendations, recovery_blocks, recovery_analysis, warnings = apply_inefficiency_mode(
+            recommendations, request.activities,
+            [item for item in request.classes if item.day == request.day],
+            slots, request.inefficiency_mode,
+        )
+        try:
+            explanation = await request_recovery_explanation(
+                request.inefficiency_mode, recovery_analysis
+            )
+            if explanation:
+                recovery_analysis.explanation = explanation
+        except Exception:
+            pass
     return ActivityRecommendationResponse(
         available_slots=slots, recommendations=recommendations,
         unassigned_activities=unassigned, source=source,
+        recovery_blocks=recovery_blocks, recovery_analysis=recovery_analysis,
+        warnings=warnings,
     )

@@ -131,6 +131,47 @@ class ActivityRecommendationRequest(BaseModel):
     day_end_time: str = Field(default="22:00", pattern=r"^(?:[01]\d|2[0-3]):[0-5]\d$")
     classes: list[ScheduledClass]
     activities: list[Activity]
+    inefficiency_mode: "InefficiencyModeConfig | None" = None
+
+
+class InefficiencyModeConfig(BaseModel):
+    enabled: bool = False
+    target_schedule_density: Literal[0, 25, 50, 75, 100] = 75
+    weekly_condition: Literal[0, 25, 50, 75, 100] | None = None
+    auto_recovery_enabled: bool = True
+    daily_start_time: str = "08:00"
+    daily_end_time: str = "22:00"
+    minimum_recovery_minutes: int = Field(default=30, ge=15, le=120, multiple_of=15)
+
+
+class RecoveryBlock(BaseModel):
+    type: Literal["RECOVERY_BLOCK"] = "RECOVERY_BLOCK"
+    start_time: str
+    end_time: str
+    duration_minutes: int
+    reason: Literal[
+        "HIGH_SCHEDULE_DENSITY", "LOW_CONDITION", "LONG_CONTINUOUS_SCHEDULE",
+        "INSUFFICIENT_DAILY_REST", "USER_DENSITY_SETTING",
+    ]
+
+
+class RecoveryScoreDetails(BaseModel):
+    rest_time_score: int
+    schedule_density_score: int
+    continuous_focus_score: int
+    recovery_activity_score: int
+
+
+class RecoveryAnalysis(BaseModel):
+    score: int
+    grade: int
+    status_message: str
+    details: RecoveryScoreDetails
+    total_rest_minutes: int
+    schedule_density_percent: int
+    longest_continuous_focus_minutes: int
+    recovery_activity_minutes: int
+    explanation: str = ""
 
 
 class ActivityRecommendationResponse(BaseModel):
@@ -138,6 +179,9 @@ class ActivityRecommendationResponse(BaseModel):
     recommendations: list[Recommendation]
     unassigned_activities: list[UnassignedActivity]
     source: Literal["SOLAR", "LOCAL"]
+    recovery_blocks: list[RecoveryBlock] = Field(default_factory=list)
+    recovery_analysis: RecoveryAnalysis | None = None
+    warnings: list[str] = Field(default_factory=list)
 
 
 class SavedTimetableRequest(BaseModel):
