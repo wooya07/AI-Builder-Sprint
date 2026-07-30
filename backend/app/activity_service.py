@@ -24,7 +24,8 @@ def sort_and_validate_classes(classes: list[ScheduledClass]) -> list[ScheduledCl
     for item in ordered:
         if to_minutes(item.end_time) <= to_minutes(item.start_time):
             raise ValueError(f"{item.course_name}: 종료 시간은 시작 시간보다 늦어야 합니다.")
-        key = (item.course_id, item.day, item.start_time, item.end_time)
+        class_identity = item.class_group_id or item.course_id
+        key = (class_identity, item.day, item.start_time, item.end_time)
         if key in seen:
             raise ValueError(f"{item.course_name}: 같은 수업이 중복 저장되어 있습니다.")
         seen.add(key)

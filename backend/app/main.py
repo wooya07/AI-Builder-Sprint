@@ -54,8 +54,22 @@ async def recommend_activities(request: ActivityRecommendationRequest) -> Activi
         raise HTTPException(status_code=422, detail=str(error)) from error
     classes = [
         {
-            "courseName": item.course_name, "startTime": item.start_time,
-            "endTime": item.end_time, "building": item.location.building,
+            "courseId": item.course_id,
+            "classGroupId": item.class_group_id or item.course_id,
+            "courseName": item.course_name,
+            "day": item.day,
+            "startTime": item.start_time,
+            "endTime": item.end_time,
+            "grade": item.grade,
+            "courseType": item.course_type,
+            "section": item.section,
+            "credits": item.credits,
+            "instructor": item.instructor,
+            "department": item.department,
+            "location": {
+                "building": item.location.building,
+                "room": item.location.room,
+            },
         }
         for item in request.classes if item.day == request.day
     ]

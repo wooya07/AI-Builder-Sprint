@@ -1,5 +1,5 @@
 from typing import Literal
-from pydantic import BaseModel, Field
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field
 
 Day = Literal["\uc6d4", "\ud654", "\uc218", "\ubaa9", "\uae08"]
 
@@ -63,11 +63,20 @@ class Location(BaseModel):
 
 
 class ScheduledClass(BaseModel):
-    course_id: str
-    course_name: str
+    model_config = ConfigDict(populate_by_name=True)
+
+    course_id: str = Field(validation_alias=AliasChoices("course_id", "courseId"))
+    class_group_id: str | None = Field(default=None, validation_alias=AliasChoices("class_group_id", "classGroupId"))
+    course_name: str = Field(validation_alias=AliasChoices("course_name", "courseName"))
     day: ActivityDay
-    start_time: str = Field(pattern=r"^(?:[01]\d|2[0-3]):[0-5]\d$")
-    end_time: str = Field(pattern=r"^(?:[01]\d|2[0-3]):[0-5]\d$")
+    start_time: str = Field(pattern=r"^(?:[01]\d|2[0-3]):[0-5]\d$", validation_alias=AliasChoices("start_time", "startTime"))
+    end_time: str = Field(pattern=r"^(?:[01]\d|2[0-3]):[0-5]\d$", validation_alias=AliasChoices("end_time", "endTime"))
+    grade: str | None = None
+    course_type: str | None = Field(default=None, validation_alias=AliasChoices("course_type", "courseType"))
+    section: str | None = None
+    credits: int | None = None
+    instructor: str | None = None
+    department: str | None = None
     location: Location = Field(default_factory=Location)
 
 
