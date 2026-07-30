@@ -50,3 +50,25 @@ def test_required_fixed_day_activity_is_placed_in_preferred_time():
     assert recommendations[0].end_time == "18:00"
     assert recommendations[0].status == "AVAILABLE"
     assert unassigned == []
+
+
+def test_accepts_camel_case_class_json_and_deduplicates_by_class_group():
+    payload = {
+        "courseId": "TEST101",
+        "classGroupId": "TEST101-001",
+        "courseName": "테스트 과목",
+        "day": "TUE",
+        "startTime": "10:00",
+        "endTime": "11:40",
+        "grade": "1",
+        "courseType": "일반선택",
+        "section": "001",
+        "credits": 2,
+        "instructor": "테스트 강사",
+        "department": "테스트 학과",
+        "location": {"building": "100", "room": "200"},
+    }
+    parsed = ScheduledClass.model_validate(payload)
+    assert parsed.class_group_id == "TEST101-001"
+    with pytest.raises(ValueError, match="중복"):
+        calculate_available_slots([parsed, parsed], "TUE")
