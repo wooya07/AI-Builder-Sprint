@@ -11,12 +11,15 @@ from .models import (
     ActivityRecommendationResponse,
     CatalogImportResult,
     Course,
+    RecoveryAnalysis,
+    RecoveryAnalysisRequest,
     TimetableRequest,
     TimetableResponse,
 )
 from .repository import list_courses
 from .service import generate_timetables
 from .solar import request_solar_recommendations
+from .recovery import adjust_recommendations, calculate_recovery_score
 
 app = FastAPI(title="Personal Semester Planner API", version="0.2.0")
 app.add_middleware(CORSMiddleware, allow_origins=["http://localhost:3000"], allow_methods=["*"], allow_headers=["*"])
@@ -48,6 +51,11 @@ async def import_course_catalog(file: UploadFile = File(...)) -> CatalogImportRe
 @app.post("/api/v1/timetables/generate", response_model=TimetableResponse)
 def generate(request: TimetableRequest) -> TimetableResponse:
     return TimetableResponse(timetables=generate_timetables(request))
+
+
+@app.post("/api/v1/recovery/analyze", response_model=RecoveryAnalysis)
+def analyze_recovery(request: RecoveryAnalysisRequest) -> RecoveryAnalysis:
+    return calculate_recovery_score(request.classes, request.activities, request.recommendations, request.recovery_blocks)
 
 
 @app.post("/api/v1/activities/recommend", response_model=ActivityRecommendationResponse)
@@ -94,7 +102,11 @@ async def recommend_activities(request: ActivityRecommendationRequest) -> Activi
             slots, request.day,
         )
         source = "SOLAR"
+    recommendations, recovery_blocks = adjust_recommendations(
+        recommendations, request.activities, slots, request.inefficiency_mode
+    )
     return ActivityRecommendationResponse(
         available_slots=slots, recommendations=recommendations,
         unassigned_activities=unassigned, source=source,
+        recovery_blocks=recovery_blocks,
     )

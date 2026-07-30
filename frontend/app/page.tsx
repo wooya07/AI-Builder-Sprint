@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
 
 type Day = "MON" | "TUE" | "WED" | "THU" | "FRI";
 type View = "semester" | "week" | "all";
@@ -17,6 +17,8 @@ type Activity = {
 };
 type Slot = { day: Day; slot_type: "BETWEEN_CLASSES" | "AFTER_CLASSES"; start_time: string; end_time: string; duration_minutes: number };
 type Recommendation = { day: Day; activity_id: string; activity_name: string; category: string; slot_type: string; start_time: string; end_time: string; duration_minutes: number; reason: string; status: string };
+type RecoveryBlock = { type: "RECOVERY_BLOCK"; day: Day; start_time: string; end_time: string; duration_minutes: number; reason: string };
+type RecoveryAnalysis = { score: number; grade: number; status_message: string; score_details: { rest_time_score: number; schedule_density_score: number; continuous_focus_score: number; recovery_activity_score: number }; total_rest_minutes: number; schedule_density_percent: number; longest_continuous_focus_minutes: number; recovery_activity_minutes: number; calculated_from: string[]; reasons: string[]; suggestions: string[] };
 type CatalogCourse = { code: string; name: string; credits: number; instructor: string; meetings: { day: string; start: number; end: number }[] };
 type Timetable = { title: string; score: number; reasons: string[]; courses: CatalogCourse[]; total_credits: number };
 
@@ -68,6 +70,25 @@ export default function Home() {
   const [shareCode, setShareCode] = useState("");
   const [importCode, setImportCode] = useState("");
   const [shareMessage, setShareMessage] = useState("");
+  const [inefficiencyEnabled, setInefficiencyEnabled] = useState(false);
+  const [targetDensity, setTargetDensity] = useState(75);
+  const [weeklyCondition, setWeeklyCondition] = useState(50);
+  const [autoRecovery, setAutoRecovery] = useState(true);
+  const [recoveryBlocks, setRecoveryBlocks] = useState<RecoveryBlock[]>([]);
+  const [recoveryAnalysis, setRecoveryAnalysis] = useState<RecoveryAnalysis | null>(null);
+  const [showRecoveryDetails, setShowRecoveryDetails] = useState(false);
+
+  useEffect(() => {
+    if (!courses.length) { setRecoveryAnalysis(null); return; }
+    const controller = new AbortController();
+    fetch(`${apiBase}/api/v1/recovery/analyze`, {
+      method: "POST", headers: { "Content-Type": "application/json" }, signal: controller.signal,
+      body: JSON.stringify({ classes: courses, activities, recommendations, recovery_blocks: recoveryBlocks }),
+    }).then(async (response) => {
+      if (response.ok) setRecoveryAnalysis(await response.json());
+    }).catch((error) => { if (error.name !== "AbortError") console.error(error); });
+    return () => controller.abort();
+  }, [courses, activities, recommendations, recoveryBlocks]);
 
   async function recommend() {
     setBusy(true); setMessage("");
@@ -75,13 +96,14 @@ export default function Home() {
       const results = await Promise.all(days.map(async ({ value }) => {
         const response = await fetch(`${apiBase}/api/v1/activities/recommend`, {
           method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ date: new Date().toISOString().slice(0, 10), day: value, timezone: "Asia/Seoul", day_end_time: "22:00", classes: courses, activities }),
+          body: JSON.stringify({ date: new Date().toISOString().slice(0, 10), day: value, timezone: "Asia/Seoul", day_end_time: "22:00", classes: courses, activities, inefficiencyMode: { enabled: inefficiencyEnabled, targetScheduleDensity: targetDensity, weeklyCondition, autoRecoveryEnabled: autoRecovery } }),
         });
         const data = await response.json();
         if (!response.ok) throw new Error(data.detail ?? "추천을 만들지 못했습니다.");
         return {
           slots: (data.available_slots as Slot[]),
           recommendations: (data.recommendations as Omit<Recommendation, "day">[]).map((item) => ({ ...item, day: value })),
+          recoveryBlocks: data.recovery_blocks as RecoveryBlock[],
         };
       }));
       const limits = new Map(activities.map((activity) => [activity.activity_id, activity.frequency_per_week ?? 1]));
@@ -93,6 +115,7 @@ export default function Home() {
         return true;
       });
       setRecommendations(combined);
+      setRecoveryBlocks(results.flatMap((result) => result.recoveryBlocks));
       setMessage(combined.length ? `${combined.length}개의 추천을 월–금 시간표에 표시했습니다.` : "조건에 맞는 활동을 찾지 못했습니다.");
       setView("week");
     } catch (error) { setMessage(error instanceof Error ? error.message : "서버에 연결할 수 없습니다."); }
@@ -179,6 +202,10 @@ export default function Home() {
       const dayIndex = days.findIndex((entry) => entry.value === item.day);
       return <article className="planner-block recommendation-block" key={`${item.day}-${item.activity_id}-${item.start_time}`} style={{ gridColumn: dayIndex + 2, gridRow: `${timeToRow(item.start_time)} / ${timeToRow(item.end_time)}` }}><b>{iconMap[item.category]} {item.activity_name}</b><span>{item.start_time}–{item.end_time}</span><small>추천 활동</small></article>;
     })}
+    {recoveryBlocks.map((item) => {
+      const dayIndex = days.findIndex((entry) => entry.value === item.day);
+      return <article className="planner-block recovery-block" key={`${item.day}-${item.start_time}`} style={{ gridColumn: dayIndex + 2, gridRow: `${timeToRow(item.start_time)} / ${timeToRow(item.end_time)}` }}><b>☁ 회복 시간</b><span>{item.start_time}–{item.end_time}</span><small>다음 일정을 위해 비워 둔 시간</small></article>;
+    })}
   </div></div>;
 
   return <main>
@@ -187,6 +214,20 @@ export default function Home() {
     {view === "week" && <><section className="compact-hero"><div><p className="eyebrow">WEEKLY PLANNER</p><h1>이번 주의 빈틈을<br/><em>한눈에 채워보세요.</em></h1></div></section>
       <section className="week-top"><section className="activity-dock"><div className="section-title"><div><p className="eyebrow">MY ACTIVITIES</p><h2>등록한 활동</h2></div><button className="add" onClick={() => setModal("activity")}>+</button></div>{activities.length ? <div className="activity-row">{activities.map((activity) => <article key={activity.activity_id}><span className="activity-icon">{iconMap[activity.category]}</span><div><b>{activity.activity_name}</b><small>{categoryMap[activity.category]} · {activity.frequency_per_week ? `주 ${activity.frequency_per_week}회` : "요일·횟수 자유"} · {durationLabel(activity.duration_minutes)}</small></div><button className="delete-activity" onClick={() => { setActivities((current) => current.filter((item) => item.activity_id !== activity.activity_id)); setRecommendations((current) => current.filter((item) => item.activity_id !== activity.activity_id)); }} aria-label={`${activity.activity_name} 삭제`}>삭제</button></article>)}</div> : <p className="empty-result">등록된 활동이 없습니다. + 버튼으로 활동을 추가하세요.</p>}</section>
       <section className="recommend-action"><span>✦</span><p>월요일부터 금요일까지</p><h2>빈 시간을 한 번에<br/>채워드릴게요.</h2><button onClick={recommend} disabled={busy || !courses.length || !activities.length}>{busy ? "추천 중..." : "활동 추천받기"} →</button></section></section>
+      <section className="inefficiency-panel">
+        <div className="inefficiency-settings">
+          <div className="mode-title"><div><p className="eyebrow">MANUAL SETTINGS</p><h2>비효율 모드</h2></div><label className="mode-switch"><input type="checkbox" checked={inefficiencyEnabled} onChange={(event) => setInefficiencyEnabled(event.target.checked)}/><span/></label></div>
+          <p>앞으로 활동을 어떻게 추천할지 직접 설정해요. 점수 계산과는 독립적으로 작동합니다.</p>
+          <fieldset disabled={!inefficiencyEnabled}><legend>일정 밀도</legend><div className="percent-buttons">{[100,75,50,25,0].map((value) => <button type="button" className={targetDensity === value ? "active" : ""} key={value} onClick={() => setTargetDensity(value)}>{value}%</button>)}</div><legend>이번 주 컨디션</legend><small>{({100:"매우 좋음",75:"좋음",50:"보통",25:"피곤함",0:"매우 피곤함"} as Record<number,string>)[weeklyCondition]}</small><div className="percent-buttons">{[100,75,50,25,0].map((value) => <button type="button" className={weeklyCondition === value ? "active" : ""} key={value} onClick={() => setWeeklyCondition(value)}>{value}%</button>)}</div><label className="recovery-check"><input type="checkbox" checked={autoRecovery} onChange={(event) => setAutoRecovery(event.target.checked)}/> 회복 시간 자동 확보</label></fieldset>
+          <button className="reapply-button" onClick={recommend} disabled={!inefficiencyEnabled || busy || !courses.length || !activities.length}>{busy ? "다시 추천 중..." : "비효율 모드 적용하여 다시 추천"}</button>
+        </div>
+        <div className="recovery-result">
+          <p className="eyebrow">AUTOMATIC ANALYSIS</p><h2>회복 점수</h2>
+          {recoveryAnalysis ? <><div className="score-number"><b>{recoveryAnalysis.score}</b><span>점</span><em>{recoveryAnalysis.grade}등급</em></div><p>{recoveryAnalysis.status_message}</p></> : <p className="recovery-placeholder">학기 시간표를 적용하면 활동이 없어도 자동으로 계산됩니다.</p>}
+          <button className="score-detail-button" onClick={() => setShowRecoveryDetails(!showRecoveryDetails)}>{showRecoveryDetails ? "회복 점수 설명 닫기" : "회복 점수란? · 계산 방법 보기"}</button>
+          {showRecoveryDetails && <div className="score-details"><h3>회복 점수란?</h3><p>현재 시간표에 수업 사이 여유와 회복 가능한 시간이 얼마나 있는지를 100점으로 보여주는 지표예요. 의료적 판단이나 건강 진단을 의미하지 않습니다.</p><h3>어떻게 계산하나요?</h3><ul><li>휴식·공강 시간 <b>최대 40점</b></li><li>하루 일정 밀도 <b>최대 25점</b></li><li>가장 긴 연속 집중 시간 <b>최대 20점</b></li><li>휴식·취미·친구·회복 시간 <b>최대 15점</b></li></ul>{recoveryAnalysis ? <><h3>현재 점수</h3><ul><li>휴식 시간 <b>{recoveryAnalysis.score_details.rest_time_score} / 40</b></li><li>일정 밀도 <b>{recoveryAnalysis.score_details.schedule_density_score} / 25</b></li><li>연속 집중 시간 <b>{recoveryAnalysis.score_details.continuous_focus_score} / 20</b></li><li>회복 활동 <b>{recoveryAnalysis.score_details.recovery_activity_score} / 15</b></li></ul><p>현재 반영: 공강 {recoveryAnalysis.total_rest_minutes}분 · 일정 밀도 {recoveryAnalysis.schedule_density_percent}% · 최장 연속 일정 {recoveryAnalysis.longest_continuous_focus_minutes}분</p>{recoveryAnalysis.reasons.map((reason) => <small key={reason}>{reason}</small>)}{recoveryAnalysis.suggestions.map((suggestion) => <small className="suggestion" key={suggestion}>{suggestion}</small>)}</> : <small>학기 시간표를 적용하면 여기에 현재 점수의 세부 계산 결과가 표시됩니다.</small>}</div>}
+        </div>
+      </section>
       <section className="planner-shell"><div className="planner-toolbar"><div><p className="eyebrow">WEEK AT A GLANCE</p><h2>빈 시간 채우기</h2></div></div>{message && <p className="planner-message">{message}</p>}{plannerBoard}</section>
     </>}
 
