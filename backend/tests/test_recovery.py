@@ -18,5 +18,5 @@ def test_score_is_calculated_from_classes_only():
 
 def test_empty_timetable_does_not_fail():
     result = calculate_recovery_score([])
-    assert 0 <= result.score <= 100
-    assert result.grade in (1, 2, 3, 4)
+    assert result.score == 85
+    assert result.grade == 1

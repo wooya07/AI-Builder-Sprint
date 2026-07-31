@@ -81,7 +81,10 @@ def calculate_recovery_score(
             chain_end = max(chain_end, end)
         longest = max(longest, chain_end - chain_start)
 
-    total_rest = sum(gaps) + sum(item.duration_minutes for item in recovery_blocks)
+    total_rest = (
+        sum(gaps) + sum(item.duration_minutes for item in recovery_blocks)
+        if classes else 5 * 14 * 60
+    )
     rest_score = 40 if total_rest >= 120 else 30 if total_rest >= 60 else 15 if total_rest >= 30 else 0
     density = round(sum(densities) / len(densities)) if densities else 0
     density_score = 25 if density <= 60 else 20 if density <= 75 else 10 if density <= 85 else 0

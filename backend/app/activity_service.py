@@ -40,7 +40,13 @@ def calculate_available_slots(
 ) -> list[AvailableSlot]:
     ordered = sort_and_validate_classes([item for item in classes if item.day == day])
     if not ordered:
-        return []
+        start, end = to_minutes("08:00"), to_minutes(day_end_time)
+        if end - start < 15:
+            return []
+        return [AvailableSlot(
+            day=day, slot_type="NO_CLASS_DAY", start_time=to_time(start),
+            end_time=to_time(end), duration_minutes=end - start,
+        )]
     slots: list[AvailableSlot] = []
     for previous, following in zip(ordered, ordered[1:]):
         start, end = to_minutes(previous.end_time), to_minutes(following.start_time)
@@ -89,27 +95,35 @@ def make_local_recommendations(
             if activity.preferred_time_range:
                 start = max(start, to_minutes(activity.preferred_time_range.start_time))
             start = ((start + 14) // 15) * 15
-            end = start + activity.duration_minutes
-            if end > slot_end or any(start < busy_end and end > busy_start for busy_start, busy_end in occupied):
-                continue
-            outside = bool(
-                activity.preferred_time_range
-                and end > to_minutes(activity.preferred_time_range.end_time)
-            )
-            recommendations.append(Recommendation(
-                activity_id=activity.activity_id, activity_name=activity.activity_name,
-                category=activity.category, slot_type=slot.slot_type,
-                start_time=to_time(start), end_time=to_time(end),
-                duration_minutes=activity.duration_minutes,
-                reason=(
-                    f"{'필수 활동이라 먼저 배치했고' if activity.priority == 'REQUIRED' else '빈 시간을 알차게 쓸 수 있고'}, "
-                    f"{'하교 후' if slot.slot_type == 'AFTER_CLASSES' else '다음 수업 전'} 여유 있게 할 수 있습니다."
-                ),
-                status="OUTSIDE_PREFERRED_TIME" if outside else "AVAILABLE",
-            ))
-            occupied.append((start, end))
-            placed = True
-            break
+            while start + activity.duration_minutes <= slot_end:
+                end = start + activity.duration_minutes
+                conflicts = [
+                    (busy_start, busy_end) for busy_start, busy_end in occupied
+                    if start < busy_end and end > busy_start
+                ]
+                if conflicts:
+                    start = ((max(busy_end for _, busy_end in conflicts) + 14) // 15) * 15
+                    continue
+                outside = bool(
+                    activity.preferred_time_range
+                    and end > to_minutes(activity.preferred_time_range.end_time)
+                )
+                recommendations.append(Recommendation(
+                    activity_id=activity.activity_id, activity_name=activity.activity_name,
+                    category=activity.category, slot_type=slot.slot_type,
+                    start_time=to_time(start), end_time=to_time(end),
+                    duration_minutes=activity.duration_minutes,
+                    reason=(
+                        f"{'필수 활동이라 먼저 배치했고' if activity.priority == 'REQUIRED' else '빈 시간을 알차게 쓸 수 있고'}, "
+                        f"{'하교 후' if slot.slot_type == 'AFTER_CLASSES' else '수업이 없는 시간에' if slot.slot_type == 'NO_CLASS_DAY' else '다음 수업 전'} 여유 있게 할 수 있습니다."
+                    ),
+                    status="OUTSIDE_PREFERRED_TIME" if outside else "AVAILABLE",
+                ))
+                occupied.append((start, end))
+                placed = True
+                break
+            if placed:
+                break
         if not placed:
             unassigned.append(UnassignedActivity(
                 activity_id=activity.activity_id, status="INSUFFICIENT_TIME",

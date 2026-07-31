@@ -97,9 +97,12 @@ async def recommend_activities(request: ActivityRecommendationRequest) -> Activi
         recommendations, unassigned = make_local_recommendations(request.activities, slots, request.day)
     else:
         recommendations = validate_recommendations(recommendations, request.activities, slots, request.day)
-        _, unassigned = make_local_recommendations(
+        fallback_recommendations, unassigned = make_local_recommendations(
             [item for item in request.activities if item.activity_id not in {rec.activity_id for rec in recommendations}],
             slots, request.day,
+        )
+        recommendations = validate_recommendations(
+            [*recommendations, *fallback_recommendations], request.activities, slots, request.day
         )
         source = "SOLAR"
     recommendations, recovery_blocks = adjust_recommendations(
