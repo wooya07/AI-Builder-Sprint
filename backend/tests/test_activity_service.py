@@ -37,6 +37,29 @@ def test_ignores_gaps_shorter_than_fifteen_minutes():
     assert slots == []
 
 
+def test_no_class_day_is_available_for_simulation():
+    slots = calculate_available_slots([], "WED", "22:00")
+    assert [(slot.slot_type, slot.start_time, slot.end_time, slot.duration_minutes) for slot in slots] == [
+        ("NO_CLASS_DAY", "08:00", "22:00", 840),
+    ]
+
+
+def test_places_all_registered_activities_without_overlap():
+    slots = calculate_available_slots([], "MON", "22:00")
+    activities = [
+        Activity(
+            activity_id=f"activity-{index}", category="REST", activity_name=f"활동 {index}",
+            priority="OPTIONAL", schedule_type="FLEXIBLE_DAY", duration_minutes=30,
+        )
+        for index in range(3)
+    ]
+    recommendations, unassigned = make_local_recommendations(activities, slots, "MON")
+    assert [(item.start_time, item.end_time) for item in recommendations] == [
+        ("08:00", "08:30"), ("08:30", "09:00"), ("09:00", "09:30"),
+    ]
+    assert unassigned == []
+
+
 def test_required_fixed_day_activity_is_placed_in_preferred_time():
     slots = calculate_available_slots([scheduled_class("A", "10:00", "16:30")], "MON")
     activity = Activity(
