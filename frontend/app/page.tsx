@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useEffect, useState } from "react";
+import { ChangeEvent, FormEvent, MouseEvent, useEffect, useRef, useState } from "react";
 
 type Day = "MON" | "TUE" | "WED" | "THU" | "FRI";
 type View = "semester" | "week" | "all";
@@ -19,8 +19,11 @@ type Slot = { day: Day; slot_type: "BETWEEN_CLASSES" | "AFTER_CLASSES"; start_ti
 type Recommendation = { day: Day; activity_id: string; activity_name: string; category: string; slot_type: string; start_time: string; end_time: string; duration_minutes: number; reason: string; status: string };
 type RecoveryBlock = { type: "RECOVERY_BLOCK"; day: Day; start_time: string; end_time: string; duration_minutes: number; reason: string };
 type RecoveryAnalysis = { score: number; grade: number; status_message: string; score_details: { rest_time_score: number; schedule_density_score: number; continuous_focus_score: number; recovery_activity_score: number }; total_rest_minutes: number; schedule_density_percent: number; longest_continuous_focus_minutes: number; recovery_activity_minutes: number; calculated_from: string[]; reasons: string[]; suggestions: string[] };
-type CatalogCourse = { code: string; name: string; credits: number; instructor: string; meetings: { day: string; start: number; end: number }[] };
+type CatalogMeeting = { day: string; start: number; end: number; start_minutes?: number | null; duration_minutes?: number | null; building?: string | null; room?: string | null };
+type CatalogCourse = { code: string; class_group_id?: string; name: string; credits: number; category: string; department?: string | null; instructor: string; meetings: CatalogMeeting[] };
 type Timetable = { title: string; score: number; reasons: string[]; courses: CatalogCourse[]; total_credits: number };
+type CurriculumCourse = { code: string | null; document_code?: string | null; name: string; credits: number | null; category: string | null; grade?: string | null; semester?: string | null; instructor?: string | null; department?: string | null; catalog_course_codes: string[]; match_type: "code" | "name" | "prefix_name" | null; match_reason: "code" | "name" | "prefix_name" | "catalog_code_not_found" | "catalog_name_not_found" };
+type CurriculumParseResult = { source_filename: string; course_count: number; raw_table_count: number; matched_course_count: number; available_course_codes: string[]; courses: CurriculumCourse[] };
 
 const apiBase = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000";
 const days: { value: Day; label: string }[] = [
@@ -44,14 +47,35 @@ const durationLabel = (minutes: number) => {
   const hours = Math.floor(minutes / 60), rest = minutes % 60;
   return `${hours ? `${hours}시간` : ""}${hours && rest ? " " : ""}${rest ? `${rest}분` : ""}` || "0분";
 };
+const minutesToTime = (minutes: number) => `${String(Math.floor(minutes / 60)).padStart(2, "0")}:${String(minutes % 60).padStart(2, "0")}`;
+const catalogMeetingTimes = (meeting: CatalogMeeting) => {
+  const start = meeting.start_minutes ?? meeting.start * 60;
+  const end = meeting.duration_minutes ? start + meeting.duration_minutes : meeting.end * 60;
+  return { start: minutesToTime(start), end: minutesToTime(end) };
+};
 const readableError = (detail: unknown, fallback: string) => {
   if (typeof detail === "string") return detail;
   if (Array.isArray(detail)) return detail.map((item) => typeof item?.msg === "string" ? item.msg : JSON.stringify(item)).join(" · ");
   if (detail && typeof detail === "object" && "msg" in detail && typeof detail.msg === "string") return detail.msg;
   return fallback;
 };
+const koreanCourseName = (name: string) => {
+  const stack: number[] = [];
+  for (let index = 0; index < name.length; index += 1) {
+    if (name[index] === "(") stack.push(index);
+    if (name[index] === ")" && stack.length) {
+      const start = stack.pop()!;
+      if (/[a-z]/.test(name.slice(start + 1, index))) {
+        return `${name.slice(0, start)}${name.slice(index + 1)}`.trim();
+      }
+    }
+  }
+  return name;
+};
 
 export default function Home() {
+  const logoClickCount = useRef(0);
+  const logoClickTimer = useRef<number | null>(null);
   const [view, setView] = useState<View>("semester");
   const [day, setDay] = useState<Day>("MON");
   const [courses, setCourses] = useState<Course[]>([]);
@@ -64,7 +88,7 @@ export default function Home() {
   const [courseDraft, setCourseDraft] = useState({ name: "", start: "09:00", end: "10:30", building: "", room: "" });
   const [activityDraft, setActivityDraft] = useState({ ...initialActivityDraft });
   const [editingActivityId, setEditingActivityId] = useState<string | null>(null);
-  const [freeDay, setFreeDay] = useState("금");
+  const [freeDay, setFreeDay] = useState("");
   const [avoidMorning, setAvoidMorning] = useState(true);
   const [firstClassStart, setFirstClassStart] = useState("");
   const [wantsLunch, setWantsLunch] = useState(false);
@@ -73,8 +97,20 @@ export default function Home() {
   const [travelMinutes, setTravelMinutes] = useState("");
   const [maxDailyClasses, setMaxDailyClasses] = useState("");
   const [endTime, setEndTime] = useState("");
+  const [studentGrade, setStudentGrade] = useState("1");
+  const [semester, setSemester] = useState("1");
   const [timetables, setTimetables] = useState<Timetable[]>([]);
   const [timetableMessage, setTimetableMessage] = useState("");
+  const [timetableLoading, setTimetableLoading] = useState(false);
+  const [curriculumFile, setCurriculumFile] = useState<File | null>(null);
+  const [curriculumLoading, setCurriculumLoading] = useState(false);
+  const [curriculumResult, setCurriculumResult] = useState<CurriculumParseResult | null>(null);
+  const [curriculumMessage, setCurriculumMessage] = useState("");
+  const [selectedCurriculumCodes, setSelectedCurriculumCodes] = useState<string[]>([]);
+  const [courseSearch, setCourseSearch] = useState("");
+  const [courseSearchResults, setCourseSearchResults] = useState<CatalogCourse[]>([]);
+  const [courseSearchLoading, setCourseSearchLoading] = useState(false);
+  const [manualCourses, setManualCourses] = useState<CatalogCourse[]>([]);
   const [shareCode, setShareCode] = useState("");
   const [importCode, setImportCode] = useState("");
   const [shareMessage, setShareMessage] = useState("");
@@ -85,10 +121,44 @@ export default function Home() {
   const [recoveryBlocks, setRecoveryBlocks] = useState<RecoveryBlock[]>([]);
   const [recoveryAnalysis, setRecoveryAnalysis] = useState<RecoveryAnalysis | null>(null);
   const [showRecoveryDetails, setShowRecoveryDetails] = useState(false);
+  const curriculumCandidateGroups = (() => {
+    const groups = new Map<string, CurriculumCourse[]>();
+    for (const course of curriculumResult?.courses ?? []) {
+      if (!course.catalog_course_codes.length) continue;
+      const label = course.grade && course.semester ? `${course.grade}학년 ${course.semester}학기` : "학년·학기 정보 없음";
+      groups.set(label, [...(groups.get(label) ?? []), course]);
+    }
+    return [...groups.entries()]
+      .sort(([left], [right]) => left.localeCompare(right, "ko"))
+      .map(([label, courses]) => ({ label, courses }));
+  })();
+  const courseSearchPanel = <div className="course-search"><label>과목 코드 또는 과목명으로 직접 추가<input value={courseSearch} onChange={(event) => setCourseSearch(event.target.value)} placeholder="예: CB1501012 또는 확률통계"/></label>{courseSearch.trim().length >= 2 && <div className="course-search-results">{courseSearchLoading ? <span>검색 중...</span> : courseSearchResults.length ? courseSearchResults.map((course) => { const selected = selectedCurriculumCodes.includes(course.code); return <div key={course.code}><span><b>{course.name}</b><small>{course.code} · {course.credits}학점 · {course.category}{course.department ? ` · ${course.department}` : ""}</small></span><button type="button" disabled={selected} onClick={() => { setSelectedCurriculumCodes((current) => [...current, course.code]); setManualCourses((current) => current.some((item) => item.code === course.code) ? current : [...current, course]); }}>{selected ? "추가됨" : "추가"}</button></div>; }) : <span>일치하는 개설 과목이 없습니다.</span>}</div>}{manualCourses.length > 0 && <details className="manual-course-list" open><summary>검색으로 추가한 과목 ({manualCourses.length})</summary>{manualCourses.map((course) => <div key={course.code}><span><b>{course.name}</b><small>{course.code} · {course.credits}학점 · {course.category}{course.department ? ` · ${course.department}` : ""}</small></span><button type="button" onClick={() => { setManualCourses((current) => current.filter((item) => item.code !== course.code)); setSelectedCurriculumCodes((current) => current.filter((code) => code !== course.code)); }}>제거</button></div>)}</details>}</div>;
 
   useEffect(() => {
     setRecoveryAnalysis(null);
   }, [courses, activities, recommendations, recoveryBlocks]);
+
+  useEffect(() => {
+    const query = courseSearch.trim();
+    if (query.length < 2) {
+      setCourseSearchResults([]);
+      return;
+    }
+    const controller = new AbortController();
+    const timer = window.setTimeout(async () => {
+      setCourseSearchLoading(true);
+      try {
+        const response = await fetch(`${apiBase}/api/v1/courses?query=${encodeURIComponent(query)}&limit=12`, { signal: controller.signal });
+        if (!response.ok) throw new Error("강의 검색에 실패했습니다.");
+        setCourseSearchResults(await response.json() as CatalogCourse[]);
+      } catch (error) {
+        if (!(error instanceof DOMException && error.name === "AbortError")) setCourseSearchResults([]);
+      } finally {
+        if (!controller.signal.aborted) setCourseSearchLoading(false);
+      }
+    }, 250);
+    return () => { window.clearTimeout(timer); controller.abort(); };
+  }, [courseSearch]);
 
   async function calculateRecovery() {
     setBusy(true); setMessage("");
@@ -187,21 +257,67 @@ export default function Home() {
 
   async function generateTimetables(event: FormEvent) {
     event.preventDefault(); setTimetableMessage("");
+    if (curriculumResult && !selectedCurriculumCodes.length) {
+      setTimetableMessage("교육과정에서 강의 목록과 일치한 과목을 한 개 이상 선택하세요.");
+      return;
+    }
+    setTimetableLoading(true);
     try {
       const response = await fetch(`${apiBase}/api/v1/timetables/generate`, {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ target_credits: 12, required_course_codes: [], preferred_free_day: freeDay, avoid_morning: avoidMorning, preferred_first_class_start: firstClassStart ? Number(firstClassStart) : null, wants_lunch: wantsLunch, wants_dinner: wantsDinner, max_consecutive_classes: maxConsecutiveClasses ? Number(maxConsecutiveClasses) : null, minimum_travel_minutes: travelMinutes ? Number(travelMinutes) : null, max_daily_classes: maxDailyClasses ? Number(maxDailyClasses) : null, preferred_end_time: endTime ? Number(endTime) : null, max_results: 3 }),
+        body: JSON.stringify({
+          student_grade: Number(studentGrade), semester: Number(semester), target_credits: 24, required_course_codes: selectedCurriculumCodes,
+          candidate_course_codes: selectedCurriculumCodes.length ? selectedCurriculumCodes : null,
+          preferred_free_day: freeDay || null, avoid_morning: avoidMorning,
+          preferred_first_class_start: firstClassStart ? Number(firstClassStart) : null,
+          wants_lunch: wantsLunch, wants_dinner: wantsDinner,
+          max_consecutive_classes: maxConsecutiveClasses ? Number(maxConsecutiveClasses) : null,
+          minimum_travel_minutes: travelMinutes ? Number(travelMinutes) : null,
+          max_daily_classes: maxDailyClasses ? Number(maxDailyClasses) : null,
+          preferred_end_time: endTime ? Number(endTime) : null, max_results: 3,
+        }),
       });
-      if (!response.ok) throw new Error("시간표를 생성하지 못했습니다.");
-      setTimetables((await response.json()).timetables);
+      const data = await response.json();
+      if (!response.ok) throw new Error(readableError(data.detail, "시간표를 생성하지 못했습니다."));
+      const generated = data.timetables as Timetable[];
+      setTimetables(generated);
+      if (!generated.length) setTimetableMessage("현재 학점과 조건을 만족하는 시간표가 없습니다. 학점 또는 선택 과목을 조정해 보세요.");
     } catch (error) { setTimetableMessage(error instanceof Error ? error.message : "서버에 연결할 수 없습니다."); }
+    finally { setTimetableLoading(false); }
+  }
+
+  function selectCurriculumFile(event: ChangeEvent<HTMLInputElement>) {
+    setCurriculumFile(event.target.files?.[0] ?? null);
+    setCurriculumResult(null); setSelectedCurriculumCodes(manualCourses.map((course) => course.code)); setCurriculumMessage("");
+  }
+
+  async function parseCurriculum() {
+    if (!curriculumFile) return;
+    setCurriculumLoading(true); setCurriculumMessage("");
+    try {
+      const formData = new FormData();
+      formData.append("file", curriculumFile);
+      const response = await fetch(`${apiBase}/api/v1/curriculum/parse`, {
+        method: "POST", body: formData,
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(readableError(data.detail, "교육과정을 분석하지 못했습니다."));
+      const result = data as CurriculumParseResult;
+      setCurriculumResult({ ...result, courses: result.courses.map((course) => ({ ...course, name: koreanCourseName(course.name) })) });
+      setSelectedCurriculumCodes(manualCourses.map((course) => course.code));
+      setCurriculumMessage(result.available_course_codes.length
+        ? `${result.matched_course_count}개 과목을 강의 목록에서 찾았습니다. 추천에 포함할 과목을 확인하세요.`
+        : "문서는 분석했지만 강의 목록과 일치한 과목을 찾지 못했습니다.");
+    } catch (error) { setCurriculumMessage(error instanceof Error ? error.message : "서버에 연결할 수 없습니다."); }
+    finally { setCurriculumLoading(false); }
   }
 
   function applyTimetable(table: Timetable) {
-    const imported: Course[] = table.courses.flatMap((course) => course.meetings.map((meeting, index) => ({
-      course_id: course.code, class_group_id: `${course.code}-${course.instructor || "group"}`, course_name: course.name, day: koreanDay[meeting.day],
-      start_time: `${String(meeting.start).padStart(2, "0")}:00`, end_time: `${String(meeting.end).padStart(2, "0")}:00`,
-      location: { building: "", room: "" },
+    const imported: Course[] = table.courses.flatMap((course) => course.meetings.map((meeting) => ({
+      course_id: course.code, class_group_id: course.class_group_id ?? `${course.code}-${course.instructor || "group"}`, course_name: course.name, day: koreanDay[meeting.day],
+      start_time: catalogMeetingTimes(meeting).start, end_time: catalogMeetingTimes(meeting).end,
+      instructor: course.instructor,
+      location: { building: meeting.building ?? "", room: meeting.room ?? "" },
     }))).filter((course) => Boolean(course.day));
     setCourses(imported); setView("week"); setMessage("추천 시간표를 이번 주 시간표에 반영했습니다.");
   }
@@ -235,13 +351,30 @@ export default function Home() {
     } catch (error) { setShareMessage(error instanceof Error ? error.message : "서버에 연결할 수 없습니다."); }
   }
 
+  const curriculumPanel = view === "semester" && <section className="curriculum-panel" aria-labelledby="curriculum-title">
+    <div className="curriculum-intro"><p className="eyebrow">COURSE PICKER</p><h2 id="curriculum-title">원하는 수업 추가하기</h2><p>교육과정 파일을 올리거나, 강의 검색으로 원하는 수업을 시간표 후보에 추가하세요.</p></div>
+    <div className="curriculum-controls">
+      <label className="file-input curriculum-file"><input type="file" accept=".pdf,.png,.jpg,.jpeg,.tiff,.bmp,.docx,.pptx,.xlsx,.hwp,.hwpx" onChange={selectCurriculumFile}/><span>{curriculumFile ? curriculumFile.name : "교육과정 파일 선택"}</span></label>
+      <button type="button" className="curriculum-upload" onClick={parseCurriculum} disabled={!curriculumFile || curriculumLoading}>{curriculumLoading ? "문서 분석 중..." : "교육과정 분석"}</button>
+    </div>
+    {curriculumMessage && <p className={curriculumResult?.available_course_codes.length ? "curriculum-message success" : "curriculum-message"}>{curriculumMessage}</p>}
+    {courseSearchPanel}
+    {curriculumResult && <div className="curriculum-result"><div className="curriculum-summary"><b>{curriculumResult.source_filename}</b><span>인식 과목 {curriculumResult.course_count}개 · 강의 목록 일치 {curriculumResult.matched_course_count}개</span></div>
+      {curriculumCandidateGroups.length > 0 && <details className="curriculum-course-list"><summary>시간표 후보에 포함할 과목</summary><p>현재 학기에 개설되지 않은 과목은 표시되지 않습니다.</p>{curriculumCandidateGroups.map((group) => <section className="curriculum-course-group" key={group.label}><h3>{group.label}</h3><div>{group.courses.map((course, index) => {
+        const codes = course.catalog_course_codes;
+        const checked = codes.every((code) => selectedCurriculumCodes.includes(code));
+        return <label key={`${course.code ?? course.name}-${index}`}><input type="checkbox" checked={checked} onChange={(event) => setSelectedCurriculumCodes((current) => event.target.checked ? Array.from(new Set([...current, ...codes])) : current.filter((code) => !codes.includes(code)))}/><span><b>{course.name}</b><small>{codes.join(", ")} · {course.credits ? `${course.credits}학점` : "학점 정보 없음"} · {course.category ?? "이수구분 정보 없음"}{course.match_type === "name" ? " · 과목명으로 매칭" : ""}</small></span></label>;
+      })}</div></section>)}</details>}
+    </div>}
+  </section>;
+
   const plannerBoard = <div className="planner-scroll"><div className="planner-grid">
     <div className="corner"/>{days.map((item, index) => <div key={item.value} className="planner-day" style={{ gridColumn: index + 2, gridRow: 1 }}>{item.label}요일</div>)}
     {Array.from({ length: 15 }, (_, index) => index + 8).map((hour, index) => <div className="time-label" key={hour} style={{ gridColumn: 1, gridRow: `${2 + index * 2} / span 2` }}>{String(hour).padStart(2, "0")}:00</div>)}
     {days.map((item, dayIndex) => <div key={item.value} className="planner-lane" style={{ gridColumn: dayIndex + 2, gridRow: "2 / span 28" }}/>)}
     {courses.map((course) => {
       const dayIndex = days.findIndex((item) => item.value === course.day);
-      return <article className="planner-block course-block" key={`${course.class_group_id}-${course.day}`} style={{ gridColumn: dayIndex + 2, gridRow: `${timeToRow(course.start_time)} / ${timeToRow(course.end_time)}` }}><b>{course.course_name}</b><span>{course.start_time}–{course.end_time}</span><button aria-label={`${course.course_name} 삭제`} onClick={() => setCourses((current) => current.filter((item) => !(item.class_group_id === course.class_group_id && item.day === course.day)))}>×</button></article>;
+      return <article className="planner-block course-block" key={`${course.class_group_id}-${course.day}`} style={{ gridColumn: dayIndex + 2, gridRow: `${timeToRow(course.start_time)} / ${timeToRow(course.end_time)}` }}><b>{course.course_name}</b><span>{course.start_time}–{course.end_time}</span>{course.instructor && <small>{course.instructor}</small>}<button aria-label={`${course.course_name} 삭제`} onClick={() => setCourses((current) => current.filter((item) => !(item.class_group_id === course.class_group_id && item.day === course.day)))}>×</button></article>;
     })}
     {recommendations.map((item) => {
       const dayIndex = days.findIndex((entry) => entry.value === item.day);
@@ -253,8 +386,20 @@ export default function Home() {
     })}
   </div></div>;
 
+  function openAdminAfterFiveLogoClicks(event: MouseEvent<HTMLAnchorElement>) {
+    event.preventDefault();
+    logoClickCount.current += 1;
+    if (logoClickTimer.current) window.clearTimeout(logoClickTimer.current);
+    if (logoClickCount.current === 5) {
+      logoClickCount.current = 0;
+      window.location.assign("/admin");
+      return;
+    }
+    logoClickTimer.current = window.setTimeout(() => { logoClickCount.current = 0; }, 1200);
+  }
+
   return <main>
-    <header><a className="logo" href="#"><b>틈</b><span>공강을 나답게</span></a><nav className="page-nav"><button className={view === "semester" ? "active" : ""} onClick={() => setView("semester")}>학기 시간표 추천</button><button className={view === "week" ? "active" : ""} onClick={() => setView("week")}>빈 시간 채우기</button><button className={view === "all" ? "active" : ""} onClick={() => setView("all")}>전체 시간표 보기</button></nav></header>
+    <header><a className="logo" href="#" onClick={openAdminAfterFiveLogoClicks}><b>틈</b><span>공강을 나답게</span></a><nav className="page-nav"><button className={view === "semester" ? "active" : ""} onClick={() => setView("semester")}>학기 시간표 추천</button><button className={view === "week" ? "active" : ""} onClick={() => setView("week")}>빈 시간 채우기</button><button className={view === "all" ? "active" : ""} onClick={() => setView("all")}>전체 시간표 보기</button></nav></header>
 
     {view === "week" && <><section className="compact-hero"><div><p className="eyebrow">WEEKLY PLANNER</p><h1>이번 주의 빈틈을<br/><em>한눈에 채워보세요.</em></h1></div></section>
       <section className="week-top"><section className="activity-dock"><div className="section-title"><div><p className="eyebrow">MY ACTIVITIES</p><h2>등록한 활동</h2></div><button className="add" onClick={openNewActivity}>+</button></div>{activities.length ? <div className="activity-row">{activities.map((activity) => <article key={activity.activity_id}><span className="activity-icon">{iconMap[activity.category]}</span><div><b>{activity.activity_name}</b><small>{categoryMap[activity.category]} · {activity.schedule_type === "FIXED_DAY" ? activity.preferred_days.map((value) => days.find((item) => item.value === value)?.label).join("·") + "요일" : activity.frequency_per_week ? `주 ${activity.frequency_per_week}회` : "요일·횟수 자유"} · {durationLabel(activity.duration_minutes)}</small></div><div className="activity-controls"><button className="edit-activity" onClick={() => openActivityEditor(activity)} aria-label={`${activity.activity_name} 수정`}>수정</button><button className="delete-activity" onClick={() => { setActivities((current) => current.filter((item) => item.activity_id !== activity.activity_id)); setRecommendations((current) => current.filter((item) => item.activity_id !== activity.activity_id)); }} aria-label={`${activity.activity_name} 삭제`}>삭제</button></div></article>)}</div> : <p className="empty-result">등록된 활동이 없습니다. + 버튼으로 활동을 추가하세요.</p>}</section>
@@ -277,7 +422,40 @@ export default function Home() {
       <section className="planner-shell"><div className="planner-toolbar"><div><p className="eyebrow">WEEK AT A GLANCE</p><h2>빈 시간 채우기</h2></div></div>{message && <p className="planner-message">{message}</p>}{plannerBoard}</section>
     </>}
 
-    {view === "semester" && <section className="standalone-page"><div className="section-title"><div><p className="eyebrow">SEMESTER PLANNER</p><h1>학기 시간표 추천</h1></div><a href="/admin">강의 목록 가져오기 →</a></div><div className="semester-grid"><form className="panel" onSubmit={generateTimetables}><fieldset className="timetable-checklist"><legend>시간표 체크리스트</legend><label>희망 첫 수업 시작 시간<select value={firstClassStart} onChange={(event) => setFirstClassStart(event.target.value)}><option value="">상관없음</option>{[9,10,11,12,13].map((hour) => <option key={hour} value={hour}>{hour}:00 이후</option>)}</select></label><label className="check">점심시간 확보<input type="checkbox" checked={wantsLunch} onChange={(event) => setWantsLunch(event.target.checked)}/></label><label className="check">저녁시간 확보<input type="checkbox" checked={wantsDinner} onChange={(event) => setWantsDinner(event.target.checked)}/></label><label>원하는 공강 요일<select value={freeDay} onChange={(event) => setFreeDay(event.target.value)}>{["월","화","수","목","금"].map((item) => <option key={item}>{item}</option>)}</select></label><label>최대 연강<select value={maxConsecutiveClasses} onChange={(event) => setMaxConsecutiveClasses(event.target.value)}><option value="">상관없음</option>{[1,2,3,4].map((count) => <option key={count} value={count}>{count}연강</option>)}</select></label><label>이동 시간<select value={travelMinutes} onChange={(event) => setTravelMinutes(event.target.value)}><option value="">상관없음</option>{[10,20,30,60].map((minutes) => <option key={minutes} value={minutes}>{minutes}분</option>)}</select></label><label>하루 최대 수업<select value={maxDailyClasses} onChange={(event) => setMaxDailyClasses(event.target.value)}><option value="">상관없음</option>{[2,3,4,5,6].map((count) => <option key={count} value={count}>{count}개</option>)}</select></label><label>희망 하교 시간<select value={endTime} onChange={(event) => setEndTime(event.target.value)}><option value="">상관없음</option>{[15,16,17,18,19,20].map((hour) => <option key={hour} value={hour}>{hour}:00 이전</option>)}</select></label></fieldset><button className="primary">12학점 시간표 만들기</button></form><div className="semester-results">{timetableMessage && <p className="error">{timetableMessage}</p>}{!timetables.length && !timetableMessage && <p className="empty-result">조건을 설정하면 추천 시간표가 여기에 표시됩니다.</p>}{timetables.map((table) => <article className="panel" key={`${table.title}-${table.score}`}><p className="eyebrow">{table.title}</p><h3>{table.total_credits}학점 · 점수 {table.score}</h3>{table.courses.map((course) => <div className="catalog-course" key={`${course.code}-${course.instructor}`}><b>{course.name}</b><span>{course.meetings.map((meeting) => `${meeting.day} ${meeting.start}:00–${meeting.end}:00`).join(" · ")}</span></div>)}<button className="apply-button" onClick={() => applyTimetable(table)}>이 시간표 적용</button></article>)}</div></div></section>}
+    {view === "semester" && <section className="standalone-page">
+      <div className="section-title"><div><p className="eyebrow">SEMESTER PLANNER</p><h1>학기 시간표 추천</h1></div></div>{curriculumPanel}
+      <div className="semester-grid">
+        <form className="panel semester-settings" onSubmit={generateTimetables} aria-busy={timetableLoading}>
+          <section className="semester-profile" aria-labelledby="semester-profile-title">
+            <h2 id="semester-profile-title">수강 정보</h2>
+            <label>학년<select value={studentGrade} onChange={(event) => setStudentGrade(event.target.value)}>{[1, 2, 3, 4].map((grade) => <option value={grade} key={grade}>{grade}학년</option>)}</select></label>
+            <label>학기<select value={semester} onChange={(event) => setSemester(event.target.value)}>{[1, 2].map((value) => <option value={value} key={value}>{value}학기</option>)}</select></label>
+          </section>
+          <section className="timetable-checklist" aria-labelledby="timetable-checklist-title">
+            <h2 id="timetable-checklist-title">시간표 체크리스트</h2>
+            <label>희망 첫 수업 시작 시간<select value={firstClassStart} onChange={(event) => setFirstClassStart(event.target.value)}><option value="">상관없음</option>{[9,10,11,12,13].map((hour) => <option key={hour} value={hour}>{hour}:00 이후</option>)}</select></label>
+            <label className="check">점심시간 확보<input type="checkbox" checked={wantsLunch} onChange={(event) => setWantsLunch(event.target.checked)}/></label>
+            <label className="check">저녁시간 확보<input type="checkbox" checked={wantsDinner} onChange={(event) => setWantsDinner(event.target.checked)}/></label>
+            <label>원하는 공강 요일<select value={freeDay} onChange={(event) => setFreeDay(event.target.value)}><option value="">없음</option>{["월","화","수","목","금"].map((item) => <option key={item}>{item}</option>)}</select></label>
+            <label>최대 연강<select value={maxConsecutiveClasses} onChange={(event) => setMaxConsecutiveClasses(event.target.value)}><option value="">상관없음</option>{[1,2,3,4].map((count) => <option key={count} value={count}>{count}연강</option>)}</select></label>
+            <label>이동 시간<select value={travelMinutes} onChange={(event) => setTravelMinutes(event.target.value)}><option value="">상관없음</option>{[10,20,30,60].map((minutes) => <option key={minutes} value={minutes}>{minutes}분</option>)}</select></label>
+            <label>하루 최대 수업<select value={maxDailyClasses} onChange={(event) => setMaxDailyClasses(event.target.value)}><option value="">상관없음</option>{[2,3,4,5,6].map((count) => <option key={count} value={count}>{count}개</option>)}</select></label>
+            <label>희망 하교 시간<select value={endTime} onChange={(event) => setEndTime(event.target.value)}><option value="">상관없음</option>{[15,16,17,18,19,20].map((hour) => <option key={hour} value={hour}>{hour}:00 이전</option>)}</select></label>
+          </section>
+          <button className="primary timetable-submit" disabled={timetableLoading}>{timetableLoading ? <><span className="loading-spinner" aria-hidden="true"/>시간표 만드는 중...</> : <>시간표 만들기 <span aria-hidden="true">→</span></>}</button>
+        </form>
+        <div className="semester-results">
+          {timetableLoading && <div className="timetable-loading" role="status"><span className="loading-spinner" aria-hidden="true"/><div><b>조건에 맞는 시간표를 찾고 있어요.</b><p>강좌 조합과 시간 조건을 확인하는 중입니다.</p></div></div>}
+          {timetableMessage && <p className="error">{timetableMessage}</p>}
+          {!timetableLoading && !timetables.length && !timetableMessage && <p className="empty-result">조건을 설정하면 추천 시간표가 여기에 표시됩니다.</p>}
+          {timetables.map((table) => <article className="panel" key={`${table.title}-${table.score}`}>
+            <p className="eyebrow">{table.title}</p><h3>{table.total_credits}학점 · 점수 {table.score}</h3>
+            {table.courses.map((course) => <div className="catalog-course" key={course.class_group_id ?? `${course.code}-${course.instructor}`}><b>{course.name}</b><span>{course.instructor} · {course.meetings.map((meeting) => { const time = catalogMeetingTimes(meeting); return `${meeting.day} ${time.start}–${time.end}`; }).join(" · ")}</span></div>)}
+            <button type="button" className="apply-button" onClick={() => applyTimetable(table)}>이 시간표 적용</button>
+          </article>)}
+        </div>
+      </div>
+    </section>}
 
     {view === "all" && <section className="standalone-page"><div className="section-title"><div><p className="eyebrow">ALL SCHEDULES</p><h1>전체 시간표 보기</h1></div></div><div className="share-tools"><section><p className="eyebrow">EXPORT</p><h2>시간표 내보내기</h2><p>현재 시간표를 DB에 저장하고 복원 코드를 발급합니다.</p><button onClick={exportTimetable} disabled={!courses.length}>내보내기</button>{shareCode && <div className="share-code"><span>{shareCode}</span><button onClick={() => navigator.clipboard.writeText(shareCode)}>복사</button></div>}</section><form onSubmit={importTimetable}><p className="eyebrow">IMPORT</p><h2>시간표 불러오기</h2><p>이전에 발급받은 코드를 입력하세요.</p><div><input required maxLength={8} value={importCode} onChange={(event) => setImportCode(event.target.value.toUpperCase())} placeholder="8자리 코드"/><button>불러오기</button></div></form></div>{shareMessage && <p className="planner-message">{shareMessage}</p>}{plannerBoard}</section>}
 

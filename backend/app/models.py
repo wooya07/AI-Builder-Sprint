@@ -30,8 +30,11 @@ class Course(BaseModel):
 
 
 class TimetableRequest(BaseModel):
+    student_grade: int = Field(default=1, ge=1, le=4)
+    semester: int = Field(default=1, ge=1, le=2)
     target_credits: int = Field(default=12, ge=1, le=24)
     required_course_codes: list[str] = Field(default_factory=list)
+    candidate_course_codes: list[str] | None = None
     completed_course_codes: list[str] = Field(default_factory=list)
     preferred_free_day: Day | None = None
     avoid_morning: bool = False
@@ -59,6 +62,7 @@ class TimetableResponse(BaseModel):
 
 class CatalogImportResult(BaseModel):
     imported_count: int
+    duplicate_count: int = 0
     skipped_rows: list[int] = Field(default_factory=list)
     message: str
 

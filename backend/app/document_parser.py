@@ -19,6 +19,8 @@ import requests
 
 UPSTAGE_DOCUMENT_PARSE_URL = "https://api.upstage.ai/v1/document-digitization"
 MAX_DOCUMENT_BYTES = 20 * 1024 * 1024
+_COURSE_CODE_PATTERN = re.compile(r"^[A-Za-z]{2,5}\d{5,9}$")
+_COURSE_CODE_FRAGMENT_PATTERN = re.compile(r"[A-Za-z]{2,5}\s*\d[\d\s]{4,8}")
 
 _MEETING_PATTERN = re.compile(
     r"(?P<day_of_week>[월화수목금])(?:요일)?\s*"
@@ -56,15 +58,24 @@ class UpstageDocumentError(RuntimeError):
 class _TableHTMLParser(HTMLParser):
     def __init__(self) -> None:
         super().__init__()
-        self.rows: list[list[str]] = []
-        self._row: list[str] | None = None
+        self._raw_rows: list[list[tuple[str, int, int]]] = []
+        self._row: list[tuple[str, int, int]] | None = None
         self._cell: list[str] | None = None
+        self._rowspan = 1
+        self._colspan = 1
+
+    @property
+    def rows(self) -> list[list[str]]:
+        return _expand_table_cells(self._raw_rows)
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         if tag == "tr":
             self._row = []
         elif tag in {"td", "th"} and self._row is not None:
             self._cell = []
+            attributes = dict(attrs)
+            self._rowspan = _span_value(attributes.get("rowspan"))
+            self._colspan = _span_value(attributes.get("colspan"))
         elif tag == "br" and self._cell is not None:
             # A timetable cell commonly contains one meeting per line.  Keep
             # that boundary so it can be serialised without merging meetings.
@@ -76,16 +87,61 @@ class _TableHTMLParser(HTMLParser):
 
     def handle_endtag(self, tag: str) -> None:
         if tag in {"td", "th"} and self._cell is not None and self._row is not None:
-            self._row.append(_normalise_cell_text("".join(self._cell)))
+            self._row.append((_normalise_cell_text("".join(self._cell)), self._rowspan, self._colspan))
             self._cell = None
         elif tag == "tr" and self._row is not None:
             if any(self._row):
-                self.rows.append(self._row)
+                self._raw_rows.append(self._row)
             self._row = None
 
 
+def _span_value(value: str | None) -> int:
+    try:
+        return max(1, int(value or "1"))
+    except ValueError:
+        return 1
+
+
+def _expand_table_cells(rows: list[list[tuple[str, int, int]]]) -> list[list[str]]:
+    """Expand HTML rowspan/colspan cells into a rectangular value matrix."""
+    expanded: list[list[str]] = []
+    active_spans: dict[int, tuple[str, int]] = {}
+
+    for source_row in rows:
+        row: list[str] = []
+        column = 0
+
+        def fill_active_spans() -> None:
+            nonlocal column
+            while column in active_spans:
+                value, remaining = active_spans[column]
+                row.append(value)
+                if remaining == 1:
+                    del active_spans[column]
+                else:
+                    active_spans[column] = (value, remaining - 1)
+                column += 1
+
+        for value, rowspan, colspan in source_row:
+            fill_active_spans()
+            for offset in range(colspan):
+                row.append(value)
+                if rowspan > 1:
+                    active_spans[column + offset] = (value, rowspan - 1)
+            column += colspan
+        fill_active_spans()
+        expanded.append(row)
+
+    width = max((len(row) for row in expanded), default=0)
+    return [row + [""] * (width - len(row)) for row in expanded]
+
+
 def parse_curriculum_document(
-    *, filename: str, content: bytes, content_type: str | None = None
+    *,
+    filename: str,
+    content: bytes,
+    content_type: str | None = None,
+    include_upstage_debug: bool = False,
 ) -> dict[str, Any]:
     """Send a document to Upstage and return timetable-ready course records."""
     if not content:
@@ -126,19 +182,26 @@ def parse_curriculum_document(
     except ValueError as exc:
         raise UpstageDocumentError("문서 분석 서비스가 올바른 응답을 반환하지 않았습니다.") from exc
 
-    rows = _extract_rows(payload)
+    extracted = _extract_rows(payload, include_debug=include_upstage_debug)
+    rows, upstage_debug = extracted if include_upstage_debug else (extracted, [])
     courses = _rows_to_courses(rows)
-    return {
+    result: dict[str, Any] = {
         "source_filename": filename,
         "courses": courses,
         "course_count": len(courses),
         "raw_table_count": len(rows),
     }
+    if include_upstage_debug:
+        result["upstage_debug"] = upstage_debug
+    return result
 
 
-def _extract_rows(payload: dict[str, Any]) -> list[list[list[str]]]:
+def _extract_rows(
+    payload: dict[str, Any], *, include_debug: bool = False,
+) -> list[list[list[str]]] | tuple[list[list[list[str]]], list[dict[str, Any]]]:
     tables: list[list[list[str]]] = []
-    for element in payload.get("elements", []):
+    debug_tables: list[dict[str, Any]] = []
+    for element_index, element in enumerate(payload.get("elements", [])):
         if not isinstance(element, dict):
             continue
         content = element.get("content") or {}
@@ -150,13 +213,27 @@ def _extract_rows(payload: dict[str, Any]) -> list[list[list[str]]]:
             parser.feed(html_table)
             if parser.rows:
                 tables.append(parser.rows)
+                if include_debug:
+                    debug_tables.append({
+                        "element_index": element_index,
+                        "source": "html",
+                        "raw_content": html_table,
+                        "rows": parser.rows,
+                    })
                 continue
         markdown = content.get("markdown")
         if isinstance(markdown, str):
             markdown_rows = _markdown_table_rows(markdown)
             if markdown_rows:
                 tables.append(markdown_rows)
-    return tables
+                if include_debug:
+                    debug_tables.append({
+                        "element_index": element_index,
+                        "source": "markdown",
+                        "raw_content": markdown,
+                        "rows": markdown_rows,
+                    })
+    return (tables, debug_tables) if include_debug else tables
 
 
 def _markdown_table_rows(markdown: str) -> list[list[str]]:
@@ -180,13 +257,19 @@ def _rows_to_courses(tables: list[list[list[str]]]) -> list[dict[str, Any]]:
     courses: list[dict[str, Any]] = []
     seen: set[tuple[str | None, str]] = set()
     for table in tables:
-        if len(table) < 2:
+        # A continuation element may contain only one compact row with several
+        # course codes, names, credit values, and semesters.
+        if not table:
             continue
-        header = [_normalise_header(cell) for cell in table[0]]
-        field_indices = _field_indices(header)
-        if "name" not in field_indices:
+        header_end, field_indices = _find_header(table)
+        if header_end is None or "name" not in field_indices:
+            for record in _rows_from_headerless_curriculum_table(table):
+                identity = (record["code"], record["name"])
+                if identity not in seen:
+                    courses.append(record)
+                    seen.add(identity)
             continue
-        for row in table[1:]:
+        for row in table[header_end:]:
             record = _course_from_row(row, field_indices)
             if not record:
                 continue
@@ -195,6 +278,131 @@ def _rows_to_courses(tables: list[list[list[str]]]) -> list[dict[str, Any]]:
                 courses.append(record)
                 seen.add(identity)
     return courses
+
+
+def _rows_from_headerless_curriculum_table(table: list[list[str]]) -> list[dict[str, Any]]:
+    """Parse continuation tables whose merged header is returned separately.
+
+    Upstage can return a curriculum section without its header.  In that form,
+    columns are ``major category, detailed category, course code, course name,
+    credits, grade-semester, note``.  A rowspan course-code cell may contain a
+    sequence of codes intended for the following course-name rows.
+    """
+    records: list[dict[str, Any]] = []
+    index = 0
+    while index < len(table):
+        row = table[index]
+        raw_code = _cell_at(row, 2)
+        name = _cell_at(row, 3)
+        codes = _extract_course_codes(raw_code)
+        if not codes or _is_summary_row(raw_code, name):
+            index += 1
+            continue
+
+        repeated_rows = [row]
+        next_index = index + 1
+        while next_index < len(table) and _cell_at(table[next_index], 2) == raw_code:
+            repeated_rows.append(table[next_index])
+            next_index += 1
+
+        if len(codes) == len(repeated_rows):
+            for course_code, course_row in zip(codes, repeated_rows):
+                record = _course_from_headerless_row(course_row, course_code)
+                if record:
+                    records.append(record)
+            index = next_index
+            continue
+
+        if len(codes) == 1:
+            record = _course_from_headerless_row(row, codes[0])
+            if record:
+                records.append(record)
+        else:
+            names = _split_course_names(name)
+            credits = re.findall(r"\d+(?:-\d+){2}", _cell_at(row, 4))
+            terms = re.findall(r"\d+(?:-\d+(?:,\d+)?)?", _cell_at(row, 5))
+            if len(names) == len(credits) == len(terms) == len(codes):
+                category = _cell_at(row, 1) or _cell_at(row, 0)
+                for course_code, course_name, credit, term in zip(codes, names, credits, terms):
+                    record = _course_from_headerless_values(category, course_code, course_name, credit, term)
+                    if record:
+                        records.append(record)
+        index += 1
+    return records
+
+
+def _cell_at(row: list[str], index: int) -> str:
+    return row[index].strip() if index < len(row) else ""
+
+
+def _extract_course_codes(value: str) -> list[str]:
+    return [
+        code
+        for code in (_normalise_course_code(fragment) for fragment in _COURSE_CODE_FRAGMENT_PATTERN.findall(value))
+        if code and _COURSE_CODE_PATTERN.fullmatch(code)
+    ]
+
+
+def _course_from_headerless_row(row: list[str], code: str) -> dict[str, Any] | None:
+    category = _cell_at(row, 1) or _cell_at(row, 0)
+    return _course_from_headerless_values(
+        category, code, _cell_at(row, 3), _cell_at(row, 4), _cell_at(row, 5)
+    )
+
+
+def _course_from_headerless_values(
+    category: str, code: str, name: str, credits: str, term: str,
+) -> dict[str, Any] | None:
+    return _course_from_row(
+        [category, code, name, credits, term],
+        {"category": 0, "code": 1, "name": 2, "credits": 3, "grade": 4, "semester": 4},
+    )
+
+
+def _split_course_names(value: str) -> list[str]:
+    """Split Korean course names that are followed by parenthesized English names."""
+    return [
+        name.strip()
+        for name in re.split(r"(?<=\))\s+(?=[가-힣◎♤])", value)
+        if name.strip()
+    ]
+
+
+def _find_header(table: list[list[str]]) -> tuple[int | None, dict[str, int]]:
+    """Locate a one- or two-row header and preserve columns from merged headers."""
+    best_end: int | None = None
+    best_indices: dict[str, int] = {}
+    best_score = 0
+    scan_limit = min(5, len(table))
+    for start in range(scan_limit):
+        for height in (1, 2):
+            end = start + height
+            if end > len(table):
+                continue
+            width = max(len(row) for row in table[start:end])
+            headers = [
+                _normalise_header(" ".join(row[column] for row in table[start:end] if column < len(row)))
+                for column in range(width)
+            ]
+            indices = _field_indices(headers)
+            year_semester_index = next(
+                (index for index, header in enumerate(headers) if "학년" in header and "학기" in header),
+                None,
+            )
+            if year_semester_index is not None:
+                indices["grade"] = year_semester_index
+                indices["semester"] = year_semester_index
+            category_indices = [
+                index
+                for index, header in enumerate(headers)
+                if "이수구분" in header or "교과목구분" in header
+            ]
+            if len(category_indices) > 1:
+                indices["category_detail"] = category_indices[-1]
+            score = len(indices) + (3 if "name" in indices else 0) + (2 if "code" in indices else 0)
+            if "name" in indices and score > best_score:
+                best_end, best_indices, best_score = end, indices, score
+    return best_end, best_indices
 
 
 def _normalise_header(value: str) -> str:
@@ -216,27 +424,58 @@ def _course_from_row(row: list[str], indices: dict[str, int]) -> dict[str, Any] 
         index = indices.get(field)
         return row[index].strip() if index is not None and index < len(row) and row[index].strip() else None
 
+    raw_code = value("code")
     name = value("name")
-    if not name or name in {"계", "합계", "total"}:
+    if not name or _is_summary_row(raw_code, name):
         return None
+    if raw_code and len(_COURSE_CODE_FRAGMENT_PATTERN.findall(raw_code)) > 1:
+        return None
+    code = _normalise_course_code(raw_code)
     credit_text = value("credits")
     credit_match = re.search(r"\d+(?:\.\d+)?", credit_text or "")
     prerequisites = value("prerequisites")
     schedule_text = _normalise_schedule_text(value("schedule_text"))
+    grade = value("grade")
+    semester = value("semester")
+    if grade and grade == semester:
+        year_term = re.fullmatch(r"\s*(\d+)\s*[-/]\s*([\d,\s]+)\s*", grade)
+        if year_term:
+            grade, semester = year_term.groups()
     return {
-        "code": value("code"),
+        "code": code,
         "name": name,
         "credits": float(credit_match.group()) if credit_match else None,
-        "category": value("category"),
+        "category": _normalise_category(value("category_detail") or value("category")),
         "instructor": value("instructor"),
-        "grade": value("grade"),
-        "semester": value("semester"),
+        "grade": grade,
+        "semester": semester,
         "section": value("section"),
         "department": _normalise_department(value("department")),
         "prerequisites": _split_prerequisites(prerequisites),
         "schedule_text": schedule_text,
         "meetings": _parse_meetings(schedule_text),
     }
+
+
+def _is_summary_row(code: str | None, name: str) -> bool:
+    combined = f"{code or ''} {name}".casefold()
+    return any(marker in combined for marker in ("소계", "합계", "total"))
+
+
+def _normalise_category(value: str | None) -> str | None:
+    if not value:
+        return None
+    compact = re.sub(r"\s+", "", value)
+    if "효원핵심교양" in compact:
+        return "효원핵심교양"
+    return value.strip()
+
+
+def _normalise_course_code(value: str | None) -> str | None:
+    if not value:
+        return None
+    compact = re.sub(r"[^A-Za-z0-9]", "", value).upper()
+    return compact if _COURSE_CODE_PATTERN.fullmatch(compact) else value.strip()
 
 
 def _split_prerequisites(value: str | None) -> list[str]:
