@@ -17,6 +17,7 @@ from .models import (
     Course,
     RecoveryAnalysis,
     RecoveryAnalysisRequest,
+    SavedTimetable,
     TimetableRequest,
     TimetableResponse,
 )
@@ -24,6 +25,7 @@ from .repository import list_courses, match_curriculum_courses
 from .service import generate_timetables
 from .solar import request_solar_recommendations
 from .recovery import adjust_recommendations, calculate_recovery_score
+from .saved_timetable_store import load_timetable, save_timetable
 
 app = FastAPI(title="Personal Semester Planner API", version="0.2.0")
 app.add_middleware(CORSMiddleware, allow_origins=["http://localhost:3000"], allow_methods=["*"], allow_headers=["*"])
@@ -37,7 +39,7 @@ def health() -> dict[str, str]:
 
 
 @app.get("/api/v1/courses", response_model=list[Course])
-def courses(query: str = "", limit: int = 20) -> list[Course]:
+def courses(query: str = "", limit: int = 20, include_sections: bool = False) -> list[Course]:
     catalog = list_courses()
     search = query.strip().casefold()
     if not search:
@@ -47,10 +49,27 @@ def courses(query: str = "", limit: int = 20) -> list[Course]:
         course for course in catalog
         if search in course.code.casefold() or search in course.name.casefold()
     ]
+    if include_sections:
+        return matches[:max(1, min(limit, 100))]
+
     unique_by_code: dict[str, Course] = {}
     for course in matches:
         unique_by_code.setdefault(course.code, course)
-    return list(unique_by_code.values())[:max(1, min(limit, 50))]
+    return list(unique_by_code.values())[:max(1, min(limit, 100))]
+
+
+@app.get("/api/v1/courses/credits")
+def course_credits(class_group_ids: str = "") -> dict[str, dict[str, int]]:
+    requested_ids = {value.strip() for value in class_group_ids.split(",") if value.strip()}
+    if not requested_ids:
+        return {"credits": {}}
+    return {
+        "credits": {
+            course.class_group_id: course.credits
+            for course in list_courses()
+            if course.class_group_id and course.class_group_id in requested_ids
+        }
+    }
 
 
 @app.post("/api/v1/admin/course-catalog/import", response_model=CatalogImportResult)
@@ -112,6 +131,19 @@ async def parse_curriculum(
 @app.post("/api/v1/timetables/generate", response_model=TimetableResponse)
 def generate(request: TimetableRequest) -> TimetableResponse:
     return TimetableResponse(timetables=generate_timetables(request))
+
+
+@app.post("/api/v1/saved-timetables")
+def export_timetable(timetable: SavedTimetable) -> dict[str, str]:
+    return {"code": save_timetable(timetable)}
+
+
+@app.get("/api/v1/saved-timetables/{code}", response_model=SavedTimetable)
+def import_timetable(code: str) -> SavedTimetable:
+    timetable = load_timetable(code)
+    if timetable is None:
+        raise HTTPException(status_code=404, detail="저장된 시간표를 찾을 수 없습니다.")
+    return timetable
 
 
 @app.post("/api/v1/recovery/analyze", response_model=RecoveryAnalysis)

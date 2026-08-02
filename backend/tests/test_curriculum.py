@@ -247,3 +247,23 @@ def test_timetable_generation_returns_best_available_credits_when_exact_target_i
     assert len(schedules) == 1
     assert schedules[0].total_credits == 3
     assert [course.code for course in schedules[0].courses] == ["CS101"]
+
+
+def test_timetable_generation_diversifies_section_choices(monkeypatch):
+    catalog = []
+    for section, instructor in [("001", "Kim"), ("002", "Park"), ("003", "Lee")]:
+        catalog.append(_course("STAT101", section, "월", 9).model_copy(update={"instructor": instructor}))
+        catalog.append(_course("MATH101", section, "화", 9).model_copy(update={"instructor": instructor}))
+    monkeypatch.setattr(service, "list_courses", lambda: catalog)
+
+    schedules = service.generate_timetables(TimetableRequest(
+        target_credits=6,
+        candidate_course_codes=["STAT101", "MATH101"],
+        max_results=3,
+    ))
+
+    statistics_instructors = {
+        next(course.instructor for course in schedule.courses if course.code == "STAT101")
+        for schedule in schedules
+    }
+    assert len(statistics_instructors) == 3

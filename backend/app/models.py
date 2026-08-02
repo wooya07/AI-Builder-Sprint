@@ -202,3 +202,31 @@ class ActivityRecommendationResponse(BaseModel):
     unassigned_activities: list[UnassignedActivity]
     source: Literal["SOLAR", "LOCAL"]
     recovery_blocks: list[RecoveryBlock] = Field(default_factory=list)
+
+
+class SavedRecommendation(Recommendation):
+    day: ActivityDay
+
+
+class SavedTimetable(BaseModel):
+    timezone: Literal["Asia/Seoul"] = "Asia/Seoul"
+    classes: list[ScheduledClass]
+    activities: list[Activity] = Field(default_factory=list)
+    recommendations: list[SavedRecommendation] = Field(default_factory=list)
+    recovery_blocks: list[RecoveryBlock] = Field(default_factory=list)
+
+
+class SavedCourseReference(BaseModel):
+    course_id: str
+    class_group_id: str
+
+
+class StoredTimetable(BaseModel):
+    """Compact on-disk form: catalog classes are referenced instead of copied."""
+
+    timezone: Literal["Asia/Seoul"] = "Asia/Seoul"
+    course_refs: list[SavedCourseReference] = Field(default_factory=list)
+    custom_classes: list[ScheduledClass] = Field(default_factory=list)
+    activities: list[Activity] = Field(default_factory=list)
+    recommendations: list[SavedRecommendation] = Field(default_factory=list)
+    recovery_blocks: list[RecoveryBlock] = Field(default_factory=list)

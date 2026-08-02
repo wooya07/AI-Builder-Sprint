@@ -122,9 +122,10 @@ def generate_timetables(request: TimetableRequest) -> list[TimetableOption]:
 
     options = [_build_option(state.courses, request) for state in target_states]
     options.sort(key=lambda option: (-option.score, _schedule_key(option.courses)))
+    options = _select_diverse_options(options, request.max_results)
     return [
         option.model_copy(update={"title": f"{request.student_grade}학년 {request.semester}학기 추천 시간표 {index}"})
-        for index, option in enumerate(options[:request.max_results], start=1)
+        for index, option in enumerate(options, start=1)
     ]
 
 
@@ -193,3 +194,41 @@ def _normalise_codes(codes: list[str] | None) -> set[str]:
 
 def _schedule_key(courses: tuple[Course, ...] | list[Course]) -> tuple[str, ...]:
     return tuple(sorted(course.class_group_id or f"{course.code}-{course.section or ''}" for course in courses))
+
+
+def _select_diverse_options(options: list[TimetableOption], max_results: int) -> list[TimetableOption]:
+    """Keep the best result, then prefer alternatives with different sections.
+
+    Scores can tie when several sections meet the same time preferences.  A
+    simple score sort then returns near-duplicate schedules (often the same
+    professor with only another course's section changed).  Select the
+    remaining results by their minimum section difference from what is already
+    shown so a student can compare meaningful professor/section choices.
+    """
+    if len(options) <= 1 or max_results <= 1:
+        return options[:max_results]
+
+    selected = [options[0]]
+    remaining = options[1:]
+    while remaining and len(selected) < max_results:
+        best_index = max(
+            range(len(remaining)),
+            key=lambda index: (
+                _minimum_section_difference(remaining[index], selected),
+                remaining[index].score,
+                -index,
+            ),
+        )
+        selected.append(remaining.pop(best_index))
+    return selected
+
+
+def _minimum_section_difference(candidate: TimetableOption, selected: list[TimetableOption]) -> int:
+    return min(_section_difference(candidate.courses, option.courses) for option in selected)
+
+
+def _section_difference(left: list[Course], right: list[Course]) -> int:
+    left_sections = {course.code.casefold(): course.class_group_id or f"{course.code}-{course.section or ''}" for course in left}
+    right_sections = {course.code.casefold(): course.class_group_id or f"{course.code}-{course.section or ''}" for course in right}
+    codes = set(left_sections) | set(right_sections)
+    return sum(left_sections.get(code) != right_sections.get(code) for code in codes)
