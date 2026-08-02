@@ -40,7 +40,7 @@ def meets_preferences(courses, request: TimetableRequest) -> bool:
             gap = current[0] - previous[1]
             if request.minimum_travel_minutes is not None and gap < request.minimum_travel_minutes:
                 return False
-            consecutive = consecutive + 1 if gap == 0 else 1
+            consecutive = consecutive + 1 if gap <= 10 else 1
             if request.max_consecutive_classes is not None and consecutive > request.max_consecutive_classes:
                 return False
     return True

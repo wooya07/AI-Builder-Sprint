@@ -1,6 +1,8 @@
 from io import BytesIO
 from openpyxl import Workbook
 from app.catalog_import import read_catalog_excel
+from app.models import Course, Meeting, TimetableRequest
+from app.service import meets_preferences
 
 
 def test_reads_catalog_from_required_columns():
@@ -14,3 +16,12 @@ def test_reads_catalog_from_required_columns():
     assert records[0]["course_code"] == "TEST101"
     assert records[0]["credits"] == 3
     assert skipped_rows == []
+
+
+def test_ten_minute_break_counts_as_consecutive_class():
+    courses = [
+        Course(code="TEST101", name="A", credits=3, category="전공", instructor="교수", meetings=[Meeting(day="월", start=9, end=10)]),
+        Course(code="TEST102", name="B", credits=3, category="전공", instructor="교수", meetings=[Meeting(day="월", start_minutes=610, duration_minutes=60, start=10, end=11)]),
+    ]
+
+    assert not meets_preferences(courses, TimetableRequest(max_consecutive_classes=1))
