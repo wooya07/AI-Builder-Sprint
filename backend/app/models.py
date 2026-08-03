@@ -30,8 +30,11 @@ class Course(BaseModel):
 
 
 class TimetableRequest(BaseModel):
+    student_grade: int = Field(default=1, ge=1, le=4)
+    semester: int = Field(default=1, ge=1, le=2)
     target_credits: int = Field(default=12, ge=1, le=24)
     required_course_codes: list[str] = Field(default_factory=list)
+    candidate_course_codes: list[str] | None = None
     completed_course_codes: list[str] = Field(default_factory=list)
     preferred_free_day: Day | None = None
     avoid_morning: bool = False
@@ -59,6 +62,7 @@ class TimetableResponse(BaseModel):
 
 class CatalogImportResult(BaseModel):
     imported_count: int
+    duplicate_count: int = 0
     skipped_rows: list[int] = Field(default_factory=list)
     message: str
 
@@ -197,4 +201,32 @@ class ActivityRecommendationResponse(BaseModel):
     recommendations: list[Recommendation]
     unassigned_activities: list[UnassignedActivity]
     source: Literal["SOLAR", "LOCAL"]
+    recovery_blocks: list[RecoveryBlock] = Field(default_factory=list)
+
+
+class SavedRecommendation(Recommendation):
+    day: ActivityDay
+
+
+class SavedTimetable(BaseModel):
+    timezone: Literal["Asia/Seoul"] = "Asia/Seoul"
+    classes: list[ScheduledClass]
+    activities: list[Activity] = Field(default_factory=list)
+    recommendations: list[SavedRecommendation] = Field(default_factory=list)
+    recovery_blocks: list[RecoveryBlock] = Field(default_factory=list)
+
+
+class SavedCourseReference(BaseModel):
+    course_id: str
+    class_group_id: str
+
+
+class StoredTimetable(BaseModel):
+    """Compact on-disk form: catalog classes are referenced instead of copied."""
+
+    timezone: Literal["Asia/Seoul"] = "Asia/Seoul"
+    course_refs: list[SavedCourseReference] = Field(default_factory=list)
+    custom_classes: list[ScheduledClass] = Field(default_factory=list)
+    activities: list[Activity] = Field(default_factory=list)
+    recommendations: list[SavedRecommendation] = Field(default_factory=list)
     recovery_blocks: list[RecoveryBlock] = Field(default_factory=list)

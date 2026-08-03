@@ -122,16 +122,33 @@ def read_catalog_excel(content: bytes) -> tuple[list[dict[str, object]], list[in
     return records, skipped_rows
 
 
-def save_catalog_json(records: list[dict[str, object]]) -> None:
-    """Store one class per meeting in the client-facing timetable JSON format."""
+def save_catalog_json(records: list[dict[str, object]]) -> tuple[int, int]:
+    """Append only previously unseen class groups to the timetable JSON catalog."""
+    existing_payload = _load_catalog_payload()
+    existing_classes = existing_payload["classes"]
+    existing_group_ids = {
+        str(course["classGroupId"])
+        for course in existing_classes
+        if isinstance(course, dict) and course.get("classGroupId")
+    }
+
     classes: list[dict[str, object]] = []
+    imported_count = 0
+    duplicate_count = 0
     for record in records:
+        class_group_id = f"{record['course_code']}-{record['section']}"
+        if class_group_id in existing_group_ids:
+            duplicate_count += 1
+            continue
+
+        imported_count += 1
+        existing_group_ids.add(class_group_id)
         for meeting in record["meetings"]:
             start_minutes = int(meeting["start_minutes"])
             end_minutes = start_minutes + int(meeting["duration_minutes"])
             classes.append({
                 "courseId": str(record["course_code"]),
-                "classGroupId": f"{record['course_code']}-{record['section']}",
+                "classGroupId": class_group_id,
                 "courseName": str(record["subject_name"]),
                 "day": DAY_CODES[str(meeting["day"])],
                 "startTime": _format_time(start_minutes),
@@ -148,13 +165,37 @@ def save_catalog_json(records: list[dict[str, object]]) -> None:
                 },
             })
 
+    if not classes:
+        return imported_count, duplicate_count
+
     CATALOG_JSON_PATH.parent.mkdir(parents=True, exist_ok=True)
     temporary_path = CATALOG_JSON_PATH.with_suffix(".json.tmp")
     temporary_path.write_text(
-        json.dumps({"timezone": "Asia/Seoul", "classes": classes}, ensure_ascii=False, indent=2) + "\n",
+        json.dumps(
+            {"timezone": existing_payload["timezone"], "classes": [*existing_classes, *classes]},
+            ensure_ascii=False,
+            indent=2,
+        ) + "\n",
         encoding="utf-8",
     )
     temporary_path.replace(CATALOG_JSON_PATH)
+    return imported_count, duplicate_count
+
+
+def _load_catalog_payload() -> dict[str, object]:
+    if not CATALOG_JSON_PATH.exists():
+        return {"timezone": "Asia/Seoul", "classes": []}
+
+    try:
+        payload = json.loads(CATALOG_JSON_PATH.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        raise ValueError("기존 수강편람 JSON을 읽을 수 없습니다.") from error
+
+    classes = payload.get("classes")
+    if not isinstance(classes, list):
+        raise ValueError("기존 수강편람 JSON 형식이 올바르지 않습니다.")
+    timezone = payload.get("timezone")
+    return {"timezone": timezone if isinstance(timezone, str) else "Asia/Seoul", "classes": classes}
 
 
 def _format_time(minutes: int) -> str:
@@ -169,7 +210,7 @@ def _normalise_department(value: str) -> str:
     return next((" ".join(line.split()) for line in text.splitlines() if line.strip()), "")
 
 
-def import_catalog(content: bytes) -> tuple[int, list[int]]:
+def import_catalog(content: bytes) -> tuple[int, int, list[int]]:
     records, skipped_rows = read_catalog_excel(content)
-    save_catalog_json(records)
-    return len(records), skipped_rows
+    imported_count, duplicate_count = save_catalog_json(records)
+    return imported_count, duplicate_count, skipped_rows

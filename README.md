@@ -28,6 +28,26 @@
 - 결과물은 데모 가능한 동작하는 앱 (웹앱, 모바일앱, CLI 도구 등 형태 무관)
 - 코딩 에이전트(Claude Code, Codex 등) 활용 시 `.claude/`, `AGENTS.md` 등 관련 설정·지침 파일을 저장소에 포함해야 심사에 반영됩니다
 
+## 교육과정 기반 자동 시간표
+
+학기 시간표 추천 탭에서 교육과정 파일을 업로드하면 Upstage Document Parse가 표의 과목명·교과목번호·학점 등을 읽습니다. 파싱된 과목은 `backend/data/course_catalog.json`의 실제 개설 강의와 교과목번호를 우선으로, 과목명을 보조로 매칭합니다. 사용자가 추천에 포함할 과목과 희망 학점을 확인하면 충돌하지 않는 분반 조합을 최대 3개 추천합니다.
+
+### 사용 방법
+
+1. 백엔드(`backend`)와 프론트엔드(`frontend`)를 실행합니다.
+2. `backend/.env`에 Upstage API 키를 설정한 뒤, **학기 시간표 추천** 탭에서 교육과정 파일을 선택하고 **교육과정 분석**을 누릅니다.
+3. 강의 목록과 일치한 과목을 확인하거나 제외한 뒤, 희망 학점과 시간표 조건을 설정해 추천을 생성합니다.
+
+문서 파싱은 PDF, 이미지, Office 문서, HWP/HWPX를 지원하며 업로드 크기는 20MB 이하입니다. 업로드 파일은 Upstage Document Parse API로 전송됩니다.
+
+API 키는 [Upstage Console](https://console.upstage.ai/api-keys?api=document-parsing)에서 발급할 수 있습니다. 키는 `backend/.env` 파일에 아래와 같이 작성합니다. 이 파일은 Git에서 제외됩니다.
+
+```dotenv
+UPSTAGE_API_KEY=up_your_key_here
+```
+
+실제 API 키는 `.env`, 소스 코드, 커밋에 포함하지 마세요.
+
 ### 심사 기준
 
 | 기준 | 배점 |
