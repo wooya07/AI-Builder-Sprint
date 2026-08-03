@@ -33,6 +33,39 @@ async def request_solar_recommendations(
         response.raise_for_status()
     try:
         content = response.json()["choices"][0]["message"]["content"]
-        return [Recommendation.model_validate(item) for item in json.loads(content).get("recommendations", [])]
+        raw_items = json.loads(content).get("recommendations", [])
+        activity_map = {item.activity_id: item for item in activities}
+        normalized: list[Recommendation] = []
+        for item in raw_items:
+            activity = activity_map.get(item.get("activity_id"))
+            start_time, end_time = item.get("start_time"), item.get("end_time")
+            if not activity or not isinstance(start_time, str) or not isinstance(end_time, str):
+                continue
+            start_minutes = int(start_time[:2]) * 60 + int(start_time[3:])
+            end_minutes = int(end_time[:2]) * 60 + int(end_time[3:])
+            if end_minutes - start_minutes != activity.duration_minutes:
+                corrected_end = start_minutes + activity.duration_minutes
+                end_time = f"{corrected_end // 60:02d}:{corrected_end % 60:02d}"
+            matching_slot = next((
+                slot for slot in slots
+                if slot.start_time <= start_time < end_time <= slot.end_time
+            ), None)
+            if not matching_slot:
+                continue
+            normalized.append(Recommendation.model_validate({
+                "activity_id": activity.activity_id,
+                "activity_name": item.get("activity_name") or activity.activity_name,
+                "category": item.get("category") or activity.category,
+                "slot_type": item.get("slot_type") or matching_slot.slot_type,
+                "start_time": start_time,
+                "end_time": end_time,
+                "duration_minutes": item.get("duration_minutes") or activity.duration_minutes,
+                "reason": item.get("reason") or item.get("notes") or "현재 일정의 빈 시간과 활동 조건을 고려해 추천했습니다.",
+                "status": item.get("status") if item.get("status") in {
+                    "AVAILABLE", "CONFLICT", "INSUFFICIENT_TIME",
+                    "OUTSIDE_PREFERRED_TIME", "ALREADY_COMPLETED",
+                } else "AVAILABLE",
+            }))
+        return normalized or None
     except (KeyError, TypeError, ValueError, json.JSONDecodeError):
         return None
