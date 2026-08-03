@@ -136,7 +136,6 @@ export default function Home() {
   const [inefficiencyEnabled, setInefficiencyEnabled] = useState(false);
   const [targetDensity, setTargetDensity] = useState(75);
   const [weeklyCondition, setWeeklyCondition] = useState(50);
-  const [autoRecovery, setAutoRecovery] = useState(true);
   const currentCourseGroupIds = [...new Set(courses.map((course) => course.class_group_id))].sort().join(",");
   const [recoveryBlocks, setRecoveryBlocks] = useState<RecoveryBlock[]>([]);
   const [recoveryAnalysis, setRecoveryAnalysis] = useState<RecoveryAnalysis | null>(null);
@@ -236,7 +235,7 @@ export default function Home() {
       const results = await Promise.all(days.map(async ({ value }) => {
         const response = await fetch(`${apiBase}/api/v1/activities/recommend`, {
           method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ date: new Date().toISOString().slice(0, 10), day: value, timezone: "Asia/Seoul", day_end_time: "22:00", classes: courses, activities, inefficiencyMode: { enabled: inefficiencyEnabled, targetScheduleDensity: targetDensity, weeklyCondition, autoRecoveryEnabled: autoRecovery } }),
+          body: JSON.stringify({ date: new Date().toISOString().slice(0, 10), day: value, timezone: "Asia/Seoul", day_end_time: "22:00", classes: courses, activities, inefficiencyMode: { enabled: inefficiencyEnabled, targetScheduleDensity: targetDensity, weeklyCondition, autoRecoveryEnabled: false } }),
         });
         const data = await response.json();
         if (!response.ok) throw new Error(readableError(data.detail, "추천을 만들지 못했습니다."));
@@ -258,7 +257,7 @@ export default function Home() {
         return true;
       });
       setRecommendations(combined);
-      setRecoveryBlocks(results.flatMap((result) => result.recoveryBlocks));
+      setRecoveryBlocks([]);
       setMessage(combined.length ? `${combined.length}개의 추천을 월–금 시간표에 표시했습니다.` : "조건에 맞는 활동을 찾지 못했습니다.");
       setView("week");
     } catch (error) { setMessage(error instanceof Error ? error.message : "서버에 연결할 수 없습니다."); }
@@ -545,14 +544,10 @@ export default function Home() {
     {recommendations.map((item) => {
       const dayIndex = days.findIndex((entry) => entry.value === item.day);
       const tooltipId = `reason-${item.day}-${item.activity_id}-${item.start_time.replace(":", "")}`;
-      return <article className="planner-block recommendation-block" tabIndex={0} aria-describedby={tooltipId} key={`${item.day}-${item.activity_id}-${item.start_time}`} style={{ gridColumn: dayIndex + 2, gridRow: `${timeToRow(item.start_time)} / ${timeToRow(item.end_time)}` }}><b>{iconMap[item.category]} {item.activity_name}</b><span>{item.start_time}–{item.end_time}</span><small>추천 활동 · 이유 보기</small><div className="recommendation-tooltip" role="tooltip" id={tooltipId}><b>왜 이 시간에 추천했나요?</b><p>{item.reason}</p></div></article>;
-      return <article className="planner-block recommendation-block" draggable={plannerCoursePickerOpen} key={`${item.day}-${item.activity_id}-${item.start_time}`} style={timetableBlockPosition(dayIndex, item.start_time, item.end_time)} onDragStart={(event) => { if (!plannerCoursePickerOpen) return; event.dataTransfer.effectAllowed = "move"; setDraggingRecommendation(item); setRecommendationDragPreview(null); }} onDragEnd={() => { setDraggingRecommendation(null); setRecommendationDragPreview(null); }}><b>{iconMap[item.category]} {item.activity_name}</b><span>{item.start_time}–{item.end_time}</span><small>추천 활동</small><button aria-label={`${item.activity_name} 추천 삭제`} onClick={() => setRecommendations((current) => current.filter((entry) => !(entry.day === item.day && entry.activity_id === item.activity_id && entry.start_time === item.start_time && entry.end_time === item.end_time)))}>×</button></article>;
+      const tooltipBelow = Number(item.start_time.slice(0, 2)) < 10;
+      return <article className={`planner-block recommendation-block${tooltipBelow ? " tooltip-below" : ""}`} draggable={plannerCoursePickerOpen} tabIndex={0} aria-describedby={tooltipId} key={`${item.day}-${item.activity_id}-${item.start_time}`} style={timetableBlockPosition(dayIndex, item.start_time, item.end_time)} onDragStart={(event) => { if (!plannerCoursePickerOpen) return; event.dataTransfer.effectAllowed = "move"; setDraggingRecommendation(item); setRecommendationDragPreview(null); }} onDragEnd={() => { setDraggingRecommendation(null); setRecommendationDragPreview(null); }}><b>{iconMap[item.category]} {item.activity_name}</b><span>{item.start_time}–{item.end_time}</span><small>추천 활동 · 이유 보기</small><div className="recommendation-tooltip" role="tooltip" id={tooltipId}><b>왜 이 시간에 추천했나요?</b><p>{item.reason}</p></div><button aria-label={`${item.activity_name} 추천 삭제`} onClick={() => setRecommendations((current) => current.filter((entry) => !(entry.day === item.day && entry.activity_id === item.activity_id && entry.start_time === item.start_time && entry.end_time === item.end_time)))}>×</button></article>;
     })}
     {recommendationDragPreview && <article className="planner-block recommendation-preview-block" aria-hidden="true" style={timetableBlockPosition(days.findIndex((item) => item.value === recommendationDragPreview.day), recommendationDragPreview.start_time, recommendationDragPreview.end_time)}><b>{iconMap[recommendationDragPreview.category]} {recommendationDragPreview.activity_name}</b><span>{recommendationDragPreview.start_time}–{recommendationDragPreview.end_time}</span><small>이동 예정</small></article>}
-    {recoveryBlocks.map((item) => {
-      const dayIndex = days.findIndex((entry) => entry.value === item.day);
-      return <article className="planner-block recovery-block" key={`${item.day}-${item.start_time}`} style={timetableBlockPosition(dayIndex, item.start_time, item.end_time)}><b>☁ 회복 시간</b><span>{item.start_time}–{item.end_time}</span><small>다음 일정을 위해 비워 둔 시간</small></article>;
-    })}
   </div></div>;
 
   function openAdminAfterFiveLogoClicks(event: MouseEvent<HTMLAnchorElement>) {
@@ -585,7 +580,7 @@ export default function Home() {
         <div className="inefficiency-settings">
           <div className="mode-title"><div><p className="eyebrow">MANUAL SETTINGS</p><h2>비효율 모드</h2></div><label className="mode-switch"><input type="checkbox" checked={inefficiencyEnabled} onChange={(event) => setInefficiencyEnabled(event.target.checked)}/><span/></label></div>
           <p>앞으로 활동을 어떻게 추천할지 직접 설정해요. 점수 계산과는 독립적으로 작동합니다.</p>
-          <fieldset disabled={!inefficiencyEnabled}><legend>일정 밀도</legend><div className="percent-buttons">{[100,75,50,25,0].map((value) => <button type="button" className={targetDensity === value ? "active" : ""} key={value} onClick={() => setTargetDensity(value)}>{value}%</button>)}</div><legend>이번 주 컨디션</legend><small>{({100:"매우 좋음",75:"좋음",50:"보통",25:"피곤함",0:"매우 피곤함"} as Record<number,string>)[weeklyCondition]}</small><div className="percent-buttons">{[100,75,50,25,0].map((value) => <button type="button" className={weeklyCondition === value ? "active" : ""} key={value} onClick={() => setWeeklyCondition(value)}>{value}%</button>)}</div><label className="recovery-check"><input type="checkbox" checked={autoRecovery} onChange={(event) => setAutoRecovery(event.target.checked)}/> 회복 시간 자동 확보</label></fieldset>
+          <fieldset disabled={!inefficiencyEnabled}><legend>일정 밀도</legend><div className="percent-buttons">{[100,75,50,25,0].map((value) => <button type="button" className={targetDensity === value ? "active" : ""} key={value} onClick={() => setTargetDensity(value)}>{value}%</button>)}</div><legend>이번 주 컨디션</legend><small>{({100:"매우 좋음",75:"좋음",50:"보통",25:"피곤함",0:"매우 피곤함"} as Record<number,string>)[weeklyCondition]}</small><div className="percent-buttons">{[100,75,50,25,0].map((value) => <button type="button" className={weeklyCondition === value ? "active" : ""} key={value} onClick={() => setWeeklyCondition(value)}>{value}%</button>)}</div></fieldset>
           <button className="reapply-button" onClick={recommend} disabled={!inefficiencyEnabled || busy || !activities.length}>{busy ? "다시 추천 중..." : "비효율 모드 적용하여 다시 추천"}</button>
         </div>
         <div className="recovery-result">
