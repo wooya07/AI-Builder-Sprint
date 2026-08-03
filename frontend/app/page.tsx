@@ -245,11 +245,8 @@ export default function Home() {
     })}
     {recommendations.map((item) => {
       const dayIndex = days.findIndex((entry) => entry.value === item.day);
-      return <article className="planner-block recommendation-block" key={`${item.day}-${item.activity_id}-${item.start_time}`} style={{ gridColumn: dayIndex + 2, gridRow: `${timeToRow(item.start_time)} / ${timeToRow(item.end_time)}` }}><b>{iconMap[item.category]} {item.activity_name}</b><span>{item.start_time}–{item.end_time}</span><small>추천 활동</small></article>;
-    })}
-    {recoveryBlocks.map((item) => {
-      const dayIndex = days.findIndex((entry) => entry.value === item.day);
-      return <article className="planner-block recovery-block" key={`${item.day}-${item.start_time}`} style={{ gridColumn: dayIndex + 2, gridRow: `${timeToRow(item.start_time)} / ${timeToRow(item.end_time)}` }}><b>☁ 회복 시간</b><span>{item.start_time}–{item.end_time}</span><small>다음 일정을 위해 비워 둔 시간</small></article>;
+      const tooltipId = `reason-${item.day}-${item.activity_id}-${item.start_time.replace(":", "")}`;
+      return <article className="planner-block recommendation-block" tabIndex={0} aria-describedby={tooltipId} key={`${item.day}-${item.activity_id}-${item.start_time}`} style={{ gridColumn: dayIndex + 2, gridRow: `${timeToRow(item.start_time)} / ${timeToRow(item.end_time)}` }}><b>{iconMap[item.category]} {item.activity_name}</b><span>{item.start_time}–{item.end_time}</span><small>추천 활동 · 이유 보기</small><div className="recommendation-tooltip" role="tooltip" id={tooltipId}><b>왜 이 시간에 추천했나요?</b><p>{item.reason}</p></div></article>;
     })}
   </div></div>;
 
