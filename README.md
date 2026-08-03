@@ -1,114 +1,79 @@
-# AI Builder Sprint 2026
+# 나만의 학기 시간표
 
-> 총 168시간, AI와 함께 만드는 도전
+수강편람을 기반으로 조건에 맞는 시간표를 추천하고, 수업 사이의 빈 시간에 개인 활동을 배치해 주는 웹 서비스입니다. 시간표 저장·불러오기, 회복 점수 분석, 수강편람 업로드를 지원합니다.
 
-## 대회 소개
+## 로컬 실행 가이드
 
-**AI Builder Sprint 2026**은 부산대학교 **APPTIVE**가 주최하고, **Upstage**, 부산대학교 **Anchor 사업단** 및 부산대학교 **AI융합교육원**이 후원하는 해커톤입니다. 참가자들은 자유로운 기술 스택을 바탕으로 실제로 동작하는 서비스를 직접 코드로 구현합니다.
+### 1. 사전 요구 사항
 
-| 항목 | 내용 |
-| --- | --- |
-| 주제 | AI를 통해 인간다움을 더욱 잘 드러낼 수 있는 서비스 개발 |
-| 팀 구성 | 2~4인 1팀 |
-| 개발 방식 | 코드 기반 앱 개발 필수 (노코드/로우코드 단독 사용 불가) |
+- Git
+- Node.js 20 이상 (LTS 권장)
+- Python 3.12 (64비트 권장)
 
-### 진행 흐름
+> Windows PowerShell 기준으로 작성했습니다. macOS/Linux에서는 가상환경 실행 파일 경로만 `.venv/bin/python`으로 바꾸면 됩니다.
 
-1. **팀 단위 참가 신청** — 팀원 정보, 프로젝트 아이디어, 활용 예정 AI 기술·API 제출
-2. **참가팀 선발** (20~50팀) — 아이디어 참신성·실현 가능성·AI 활용 계획 기반 서류 심사
-3. **예선 개발 기간** (7.27 ~ 8.3, 약 1주일) — API 크레딧 발급, 아이디어 구체화 및 개발
-4. **결과물 제출 및 1차 심사** — 데모 영상/배포 링크, 코드 저장소, 발표 자료, AI 활용 증빙 제출
-5. **본선 발표 및 질의응답** (8.7) — 팀당 7분 발표 + 5분 Q&A, 심사 후 수상팀 확정
+### 2. 저장소 내려받기
 
-### 기술 스택 및 규칙
-
-- 사용 API·모델은 자유이며, **Upstage API**(Solar LLM, Document Parse, Information Extract) 활용 시 심사 가점
-- Claude, GPT, Gemini 등 타사 모델 병행 사용 가능 (제약 없음)
-- 프레임워크/언어 자유 (Python, JavaScript, React, Flutter 등)
-- 결과물은 데모 가능한 동작하는 앱 (웹앱, 모바일앱, CLI 도구 등 형태 무관)
-- 코딩 에이전트(Claude Code, Codex 등) 활용 시 `.claude/`, `AGENTS.md` 등 관련 설정·지침 파일을 저장소에 포함해야 심사에 반영됩니다
-
-## 교육과정 기반 자동 시간표
-
-학기 시간표 추천 탭에서 교육과정 파일을 업로드하면 Upstage Document Parse가 표의 과목명·교과목번호·학점 등을 읽습니다. 파싱된 과목은 `backend/data/course_catalog.json`의 실제 개설 강의와 교과목번호를 우선으로, 과목명을 보조로 매칭합니다. 사용자가 추천에 포함할 과목과 희망 학점을 확인하면 충돌하지 않는 분반 조합을 최대 3개 추천합니다.
-
-### 사용 방법
-
-1. 백엔드(`backend`)와 프론트엔드(`frontend`)를 실행합니다.
-2. `backend/.env`에 Upstage API 키를 설정한 뒤, **학기 시간표 추천** 탭에서 교육과정 파일을 선택하고 **교육과정 분석**을 누릅니다.
-3. 강의 목록과 일치한 과목을 확인하거나 제외한 뒤, 희망 학점과 시간표 조건을 설정해 추천을 생성합니다.
-
-문서 파싱은 PDF, 이미지, Office 문서, HWP/HWPX를 지원하며 업로드 크기는 20MB 이하입니다. 업로드 파일은 Upstage Document Parse API로 전송됩니다.
-
-API 키는 [Upstage Console](https://console.upstage.ai/api-keys?api=document-parsing)에서 발급할 수 있습니다. 키는 `backend/.env` 파일에 아래와 같이 작성합니다. 이 파일은 Git에서 제외됩니다.
-
-```dotenv
-UPSTAGE_API_KEY=up_your_key_here
-```
-
-실제 API 키는 `.env`, 소스 코드, 커밋에 포함하지 마세요.
-
-### 심사 기준
-
-| 기준 | 배점 |
-| --- | --- |
-| 창의성 | 20점 |
-| AI 활용도 | 20점 |
-| 완성도 | 20점 |
-| 실용성 | 20점 |
-| 발표력 (본선) | 20점 |
-| Upstage API 활용 가점 | +5점 |
-| 지역사회 기여도 가점 | +5점 |
-
-### 시상 내역
-
-- 대상 1팀: 100만원 + 상품
-- 최우수상 1팀: 50만원 + 상품
-- 우수상 1팀: 상품
-- 본선 참가 10팀: Upstage 굿즈 + 참가 인증서
-
-## Git Fork 하는 방법
-
-참가팀은 이 저장소를 팀 대표의 GitHub 계정으로 **Fork**한 뒤, 해당 Fork 저장소에서 프로젝트를 개발하고 최종 결과물을 제출합니다.
-
-### 1. 저장소 Fork하기
-
-1. [AI-Builder-Sprint 저장소](https://github.com/ApptiveDev/AI-Builder-Sprint)에 접속합니다.
-2. 우측 상단의 **Fork** 버튼을 클릭합니다.
-  <img width="1888" height="1131" alt="스크린샷 2026-07-27 오전 12 31 16" src="https://github.com/user-attachments/assets/2f0f7f80-6c92-4ba5-87c5-89ed6107eeab" />
-
-3. 본인(또는 팀 대표) GitHub 계정으로 저장소가 복사됩니다. (`https://github.com/<내-계정>/AI-Builder-Sprint`)
-
-### 2. Fork한 저장소 로컬로 클론하기
-
-```bash
-git clone https://github.com/<내-계정>/AI-Builder-Sprint.git
+```powershell
+git clone https://github.com/wooya07/AI-Builder-Sprint.git
 cd AI-Builder-Sprint
 ```
 
-### 3. 개발 진행 및 커밋
+### 3. 백엔드 실행
 
-```bash
-git checkout -b develop
-# 코드 작성 및 수정
-git add .
-git commit -m "feat: 프로젝트 초기 구현"
-git push origin develop
+새 PowerShell 창을 열고 아래 명령을 실행합니다.
+
+```powershell
+cd backend
+Copy-Item .env.example .env
+py -3.12 -m venv .venv
+.\.venv\Scripts\python.exe -m pip install --upgrade pip
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+.\.venv\Scripts\python.exe -m uvicorn app.main:app --reload
 ```
 
-포크된 저장소 내에서 개발을 진행해주시면 됩니다.
+정상 기동 확인:
 
-### 4. 결과물 제출
+- 상태 확인: [http://localhost:8000/health](http://localhost:8000/health)
+- API 문서: [http://localhost:8000/docs](http://localhost:8000/docs)
 
-- **팀별로 Fork한 본인 저장소 URL을 제출 양식에 기재합니다.**
-- 제출 마감 전까지 코드, 데모 영상/배포 링크, 발표 자료를 함께 준비해 제출해주세요.
-- 코딩 에이전트를 활용한 경우 `.claude/`, `AGENTS.md` 등 설정 파일도 반드시 저장소에 포함해주세요.
+### 4. 프런트엔드 실행
 
+백엔드를 종료하지 않은 채, **별도의 PowerShell 창**에서 아래 명령을 실행합니다.
 
-## 문의
+```powershell
+cd frontend
+Copy-Item .env.example .env.local
+npm ci
+npm run dev
+```
 
-- 대회 관련 문의: 해커톤 문의 오픈채팅방
-- 주최: 부산대학교 APPTIVE, 정보컴퓨터공학부 동아리연합회 / 후원: Upstage, 부산대 Anchor 사업단, 부산대 AI융합교육원
+브라우저에서 [http://localhost:3000]에 접속합니다.
 
+`http://localhost:3000`이 이미 사용 중이면 Next.js가 다른 포트를 제안할 수 있습니다. 이 경우 백엔드의 CORS 설정과 맞추기 위해 3000번 포트를 비운 뒤 다시 실행해 주세요.
 
-- 김준우 브랜치 분리 테스트
+## 환경 변수
+
+`backend/.env`에 아래처럼 본인의 키를 설정합니다
+```
+UPSTAGE_API_KEY=up_your_key_here
+```
+키가 없어도 수강 조건 기반 시간표 추천, 시간표 편집·저장·불러오기, 회복 점수, 로컬 규칙 기반 활동 추천은 사용할 수 있습니다. 다만 **교육과정 파일 분석**은 Upstage API 키가 필요합니다.
+
+## 빠른 기능 확인 순서
+
+1. [http://localhost:3000]에서 **학기 시간표 추천** 교육과정 한글파일을 업로드한 후 수강할 과목을 선택, 탭의 조건을 선택한 뒤 `시간표 만들기`를 누릅니다.
+2. 추천 결과에서 `이 시간표 적용`을 눌러 주간 시간표에 반영합니다.
+3. **빈 시간 채우기**에서 활동을 추가한 뒤 추천 기능과 회복 점수 계산을 확인합니다.
+4. **전체 시간표 보기**에서 내보내기 코드를 발급하고, 같은 화면에서 코드를 입력해 불러오기를 확인합니다.
+
+## 종료 방법
+
+프런트엔드와 백엔드가 실행 중인 각 PowerShell 창에서 `Ctrl+C`를 누릅니다.
+
+## 문제 해결
+
+- `py -3.12`를 찾지 못하면 Python 3.12를 설치한 뒤 터미널을 다시 열어 주세요.
+- Python 패키지 설치에 실패하면 `backend/.venv`를 삭제한 뒤 백엔드 설치 명령부터 다시 실행합니다.
+- 화면에서 API 연결 오류가 보이면 백엔드가 `http://localhost:8000/health`에서 `{"status":"ok"}`를 반환하는지 먼저 확인합니다.
+- `npm ci` 오류가 나면 Node.js 버전을 20 이상으로 올린 뒤 다시 시도합니다.
